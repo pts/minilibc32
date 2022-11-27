@@ -40,6 +40,8 @@
 
 ; --- Generic i386 functions.
 
+%ifndef FEATURES_WE  ; FEATURES_WE means write(...) + exit(...) only, for hello-world benchmark.
+
 global $isalpha_
 $isalpha_:
 		or al, 20h
@@ -127,77 +129,61 @@ $strcmp_:
 		pop esi
 		ret
 
+%endif  ; ifndef FEATURES_WE
+
 ; --- Linux i386 syscall (system call) functions.
+
+%ifndef FEATURES_WE
 
 global $sys_brk_
 $sys_brk_:
-		push ecx
 		push byte 45		; __NR_brk.
-__do_syscall1:	xchg ecx, [esp]
-		push ebx
-		xchg eax, ebx
-		xchg eax, ecx
-__do_syscallx:	int 80h
-		test eax, eax
-		jns .8
-		or eax, byte -1
-.8:		pop ebx
-		pop ecx
-		ret
+		jmp short __do_syscall3
 
 global $unlink_
 $unlink_:
 global $remove_
 $remove_:
 		push byte 10		; __NR_unlink.
-		jmp __do_syscall1
+		jmp short __do_syscall3
 
 global $close_
 $close_:
 		push byte 6		; __NR_close.
-		jmp __do_syscall1
+		jmp short __do_syscall3
 
 
 global $creat_
 $creat_:
-		push ecx
-		push ebx
-		mov ebx, 8		; __NR_creat.
-__do_syscall2:	xchg eax, ebx
-		xchg ecx, edx
-		jmp short __do_syscallx
+		push byte 8		; __NR_creat.
+		jmp short __do_syscall3
 
 global $rename_
 $rename_:
-		push ecx
-		push ebx
-		mov ebx, 38		; __NR_rename.
-		jmp short __do_syscall2  ; !! TODO(pts): merge all to __do_syscall3.
+		push byte 38		; __NR_rename.
+		jmp short __do_syscall3  ; !! TODO(pts): merge all to __do_syscall3.
 
 global $open3_
 $open3_:
 		push byte 5		; __NR_open.
-__do_syscall3:	xchg ecx, [esp]
-		xchg eax, ebx
-		xchg eax, edx
-		xchg eax, ecx
-		push ebx		; Not needed to save, just to make it compatible with __do_syscallx.
-		jmp short __do_syscallx
+		jmp short __do_syscall3
 
 global $read_
 $read_:
 		push byte 3		; __NR_read.
-		jmp __do_syscall3
-
-global $write_
-$write_:
-		push byte 4		; __NR_write.
-		jmp __do_syscall3
+		jmp short __do_syscall3
 
 global $lseek_
 $lseek_:
 		push byte 19		; __NR_lseek.
-		jmp __do_syscall3
+		jmp short __do_syscall3
+
+%endif  ; ifndef FEATURES_WE
+
+global $write_
+$write_:
+		push byte 4		; __NR_write.
+		jmp short __do_syscall3
 
 ; --- Entry and exit().
 
@@ -207,7 +193,7 @@ extern $main_from_libc_
 ..start:
 %endif
 %ifidn __OUTPUT_FORMAT__,bin
-$main_from_libc_ equ $$  ; 
+$main_from_libc_ equ $$  ; Dummy value to avoid undefined symbols.
 %endif
 $_start:  ; Program entry point.
 		pop eax			; argc.
@@ -217,7 +203,21 @@ $_start:  ; Program entry point.
 global $exit_
 $exit_:
 		push byte 1		; __NR_exit.
-		jmp short __do_syscall1
+__do_syscall3:	; Do system call of up to 3 argumnts: dword[esp]: syscall number, eax: arg1, edx: arg2, ebx: arg3.
+		xchg ecx, [esp]		; Keep ecx pushed.
+		xchg eax, ebx
+		xchg eax, edx
+		xchg eax, ecx
+		push edx
+		push ebx
+		int 80h
+		test eax, eax
+		jns .8
+		or eax, byte -1
+.8:		pop ebx
+		pop edx
+		pop ecx
+		ret
 		; This would also work, but it is longer:
 		;xchg eax, ebx
 		;xor eax, eax
@@ -226,6 +226,8 @@ $exit_:
 
 
 ; --- Functions using the Linux i386 syscalls.
+
+%ifndef FEATURES_WE
 
 ; Implemented using sys_brk(2).
 global $malloc_
@@ -277,6 +279,8 @@ $malloc_:
 .18:		pop edx
 		pop ecx
 		ret
+
+%endif  ; ifndef FEATURES_WE
 
 ; --- Rest of the program code, to avoid undefined labels.
 

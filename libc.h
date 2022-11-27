@@ -80,11 +80,11 @@ extern int __LIBC_FUNC(isxdigit, (int c));
 extern size_t __LIBC_FUNC(strlen, (const char *s));
 extern char* __LIBC_FUNC(strcpy, (char *dest, const char *src));
 extern int __LIBC_FUNC(strcmp, (const char *s1, const char *s2));
-extern __LIBC_NORETURN void __LIBC_FUNC(exit, (int status));
 
 /* --- <stdlib.h> */
 
 extern void* __LIBC_FUNC(malloc, (size_t size));
+extern __LIBC_NORETURN void __LIBC_FUNC(exit, (int status));
 
 /* --- <fcntl.h> and <unistd.h> */
 extern void* __LIBC_FUNC(sys_brk, (void *addr));

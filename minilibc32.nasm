@@ -45,11 +45,11 @@
 %define _BSS .bss  ; Section name.
 %endif
 
-%ifidn __OUTPUT_FORMAT__,elf
+%ifidn __OUTPUT_FORMAT__,elf  ; GCC regparm(3) calling convention.
 %define SYM(name) name %+ __RP3__  ; GCC regparm(3) calling convention is indicated for minilibc32 GCC.
 %define REGARG3 ecx
 %define REGNARG ebx  ; A register which is not used by the first 3 function arguments.
-%else
+%else  ; OpeNWatcom __watcall calling convention.
 %define SYM(name) name %+ _  ; OpenWatcom __watcall calling convention is indicated with a trailing `_' by OpenWatcom.
 %define REGARG3 ebx
 %define REGNARG ecx

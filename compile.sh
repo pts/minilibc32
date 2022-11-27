@@ -31,6 +31,11 @@ $NASM -O9 -f elf -o minilibc32.o minilibc32.nasm
 # Compile write(2)+exit(2) version (for hello-world benchmark).
 $NASM -O9 -f elf -DFEATURES_WE -o minilibc32we.o minilibc32.nasm
 
+# Compile the minilibc32.s fork with GNU as.
+AS="$($GCC -print-prog-name=as)"
+test "$AS"
+"$AS" -32 -march=i386 -o minilibc32a.o minilibc32.s
+
 # Compile program test1ow with OpenWatcom (owcc).
 owcc -blinux -fnostdlib -Os -s -fno-stack-check -march=i386 -W -Wall -Wextra -Werror -o test1ow test1.c minilibc32.obj
 

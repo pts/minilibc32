@@ -32,3 +32,8 @@ void regsave(void) {
    */
   __asm__ __volatile__ ("" : : : "eax", "ebx", "ecx", "edi", "esi", "edi", "ebp", "memory");
 }
+
+int uivar;
+
+extern void callee(void);
+void caller(void) { callee(); callee(); }

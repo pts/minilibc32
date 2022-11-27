@@ -80,6 +80,7 @@ extern int __LIBC_FUNC(isxdigit, (int c));
 extern size_t __LIBC_FUNC(strlen, (const char *s));
 extern char* __LIBC_FUNC(strcpy, (char *dest, const char *src));
 extern int __LIBC_FUNC(strcmp, (const char *s1, const char *s2));
+extern void* __LIBC_FUNC(memcpy, (void *dest, const void *src, size_t n));
 
 /* --- <stdlib.h> */
 

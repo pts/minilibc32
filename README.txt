@@ -25,11 +25,12 @@ the OpenWatcom __watcall calling convention:
 * strlen(3): 14 bytes
 * strcpy(3): 16 bytes
 * strcmp(3): 26 bytes
+* memcpy(3): 16 bytes
 * malloc(3): 146 bytes, unaligned, uses brk(2), no way to free(3) heap memory
 * _start entry point startup code calling main(...) + exit(2): 8 bytes
 * syscall trampoline __do_syscall3(...): 19 bytes
 * syscall (system call) wrappers (e.g. write(2)): 4 bytes each
-* total of the above: 321 bytes
+* total of the above: 337 bytes
 
 i386 means in this context means not only the 32-bit Intel x86 (IA-32)
 instruction set architecture (ISA), but also the minimum CPU requirement

@@ -146,6 +146,24 @@ SYM($strcmp):
 		pop esi
 		ret
 
+global SYM($memcpy)
+SYM($memcpy):
+		push edi
+		xchg esi, edx
+		xchg edi, eax		; EDI := dest; EAX := junk.
+%ifnidn REGARG3,ecx
+		xchg ecx, REGARG3
+%endif
+		push edi
+		rep movsb
+		pop eax			; Will return dest.
+%ifnidn REGARG3,ecx
+		xchg ecx, REGARG3	; Restore ECX from REGARG3. And REGARG3 is scratch, we don't care what we put there.
+%endif
+		xchg esi, edx		; Restore ESI.
+		pop edi
+		ret
+
 %endif  ; ifndef FEATURES_WE
 
 ; --- Linux i386 syscall (system call) functions.

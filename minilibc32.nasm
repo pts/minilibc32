@@ -4,6 +4,8 @@
 ;
 ; Compile for OpenWatcom: nasm-0.98.39 -O9 -f obj -o minilibc32.obj minilibc32.nasm
 ;
+; Compile for GCC: nasm-0.98.39 -O9 -f elf -o minilibc32.o minilibc32.nasm
+;
 ; Test compile for size only: nasm-0.98.39 -O9 -f bin -o minilibc32.bin minilibc32.nasm
 ;
 ; Functions in this libc are optimized for code size rather than execution
@@ -17,6 +19,11 @@
 ; use EAX, the arithmetic flags in EFLAGS (but not DF, which is expected to
 ; be 0 and must restored to 0) and all actual argument registers are scratch
 ; registers, and it must restore everything else.
+;
+; The regparm(3) calling convention of GCC passes up to 3 function arguments
+; in EAX, EDX, ECX (please note that ECX is different from __watcall), and
+; pushes the rest to the stack ([esp+4], [esp+8] etc.; [esp] is the return
+; address). The caller removes arguments from the stack.
 ;
 ; TODO(pts): Convert this NASM source to WASM and GNU as, and drop NASM as a dependency.
 ;
@@ -38,12 +45,22 @@
 %define _BSS .bss  ; Section name.
 %endif
 
+%ifidn __OUTPUT_FORMAT__,elf
+%define SYM(name) name %+ __RP3__  ; GCC regparm(3) calling convention is indicated for minilibc32 GCC.
+%define REGARG3 ecx
+%define REGNARG ebx  ; A register which is not used by the first 3 function arguments.
+%else
+%define SYM(name) name %+ _  ; OpenWatcom __watcall calling convention is indicated with a trailing `_' by OpenWatcom.
+%define REGARG3 ebx
+%define REGNARG ecx
+%endif
+
 ; --- Generic i386 functions.
 
 %ifndef FEATURES_WE  ; FEATURES_WE means write(...) + exit(...) only, for hello-world benchmark.
 
-global $isalpha_
-$isalpha_:
+global SYM($isalpha)
+SYM($isalpha):
 		or al, 20h
 		sub al, 61h
 		cmp al, 1ah
@@ -51,8 +68,8 @@ $isalpha_:
 		neg eax
 		ret
 
-global $isspace_
-$isspace_:
+global SYM($isspace)
+SYM($isspace):
 		sub al, 9
 		cmp al, 5
 		jb .1
@@ -62,16 +79,16 @@ $isspace_:
 		neg eax
 		ret
 
-global $isdigit_
-$isdigit_:
+global SYM($isdigit)
+SYM($isdigit):
 		sub al, 30h
 		cmp al, 0ah
 		sbb eax, eax
 		neg eax
 		ret
 
-global $isxdigit_
-$isxdigit_:
+global SYM($isxdigit)
+SYM($isxdigit):
 		sub al, 30h
 		cmp al, 0ah
 		jb .2
@@ -82,8 +99,8 @@ $isxdigit_:
 		neg eax
 		ret
 
-global $strlen_
-$strlen_:
+global SYM($strlen)
+SYM($strlen):
 		push esi
 		xchg eax, esi
 		xor eax, eax
@@ -95,8 +112,8 @@ $strlen_:
 		pop esi
 		ret
 
-global $strcpy_
-$strcpy_:
+global SYM($strcpy)
+SYM($strcpy):
 		push edi
 		xchg esi, edx
 		xchg eax, edi
@@ -110,8 +127,8 @@ $strcpy_:
 		pop edi
 		ret
 
-global $strcmp_
-$strcmp_:
+global SYM($strcmp)
+SYM($strcmp):
 		push esi
 		xchg eax, esi
 		xor eax, eax
@@ -135,53 +152,55 @@ $strcmp_:
 
 %ifndef FEATURES_WE
 
-global $sys_brk_
-$sys_brk_:
+global SYM($sys_brk)
+SYM($sys_brk):
 		push byte 45		; __NR_brk.
 		jmp short __do_syscall3
 
-global $unlink_
-$unlink_:
-global $remove_
-$remove_:
+global SYM($unlink)
+SYM($unlink):
+global SYM($remove)
+SYM($remove):
 		push byte 10		; __NR_unlink.
 		jmp short __do_syscall3
 
-global $close_
-$close_:
+global SYM($close)
+SYM($close):
 		push byte 6		; __NR_close.
 		jmp short __do_syscall3
 
 
-global $creat_
-$creat_:
+global SYM($creat)
+SYM($creat):
 		push byte 8		; __NR_creat.
 		jmp short __do_syscall3
 
-global $rename_
-$rename_:
+global SYM($rename)
+SYM($rename):
 		push byte 38		; __NR_rename.
-		jmp short __do_syscall3  ; !! TODO(pts): merge all to __do_syscall3.
+		jmp short __do_syscall3
 
-global $open3_
-$open3_:
+global SYM($open)
+SYM($open):  ; With 2 or 3 arguments, arg3 is mode.
+global SYM($open3)
+SYM($open3):  ; With 2 or 3 arguments, arg3 is mode.
 		push byte 5		; __NR_open.
 		jmp short __do_syscall3
 
-global $read_
-$read_:
+global SYM($read)
+SYM($read):
 		push byte 3		; __NR_read.
 		jmp short __do_syscall3
 
-global $lseek_
-$lseek_:
+global SYM($lseek)
+SYM($lseek):
 		push byte 19		; __NR_lseek.
 		jmp short __do_syscall3
 
 %endif  ; ifndef FEATURES_WE
 
-global $write_
-$write_:
+global SYM($write)
+SYM($write):
 		push byte 4		; __NR_write.
 		jmp short __do_syscall3
 
@@ -189,34 +208,47 @@ $write_:
 
 global $_start
 %ifidn __OUTPUT_FORMAT__,obj
-extern $main_from_libc_
+extern SYM($main_from_libc)
 ..start:
 %endif
+%ifidn __OUTPUT_FORMAT__,elf
+extern $main  ; No SYM(...), this is user-defined.
+%endif
 %ifidn __OUTPUT_FORMAT__,bin
-$main_from_libc_ equ $$  ; Dummy value to avoid undefined symbols.
+SYM($main_from_libc) equ $$  ; Dummy value to avoid undefined symbols.
 %endif
 $_start:  ; Program entry point.
 		pop eax			; argc.
 		mov edx, esp		; argv.
-		call $main_from_libc_
+%ifidn REGARG3,ebx  ; regparm(3). Make it also work if main(...) is regparm(0), e.g. `gcc' without `-mregparm=3'.
+		call SYM($main_from_libc)
+%else
+		push edx
+		push eax
+		call $main
+%endif
 		; Fall through to exit_.
-global $exit_
-$exit_:
+global SYM($exit)
+SYM($exit):
 		push byte 1		; __NR_exit.
 __do_syscall3:	; Do system call of up to 3 argumnts: dword[esp]: syscall number, eax: arg1, edx: arg2, ebx: arg3.
-		xchg ecx, [esp]		; Keep ecx pushed.
+		xchg REGNARG, [esp]	; Keep REGNARG pushed.
 		xchg eax, ebx
+%ifidn REGARG3,ebx  ; __watcall.
 		xchg eax, edx
 		xchg eax, ecx
+%else  ; regparm(3).
+		xchg ecx, edx
+%endif
 		push edx
-		push ebx
+		push REGARG3
 		int 80h
 		test eax, eax
 		jns .8
 		or eax, byte -1
-.8:		pop ebx
+.8:		pop REGARG3
 		pop edx
-		pop ecx
+		pop REGNARG
 		ret
 		; This would also work, but it is longer:
 		;xchg eax, ebx
@@ -230,8 +262,8 @@ __do_syscall3:	; Do system call of up to 3 argumnts: dword[esp]: syscall number,
 %ifndef FEATURES_WE
 
 ; Implemented using sys_brk(2).
-global $malloc_
-$malloc_:
+global SYM($malloc)
+SYM($malloc):
 		push ecx
 		push edx
 		mov edx, eax
@@ -244,7 +276,7 @@ $malloc_:
 .14:		mov eax, [$__malloc_base]
 		test eax, eax
 		jne .15
-		call $sys_brk_
+		call SYM($sys_brk)
 		mov [$__malloc_free], eax
 		mov [$__malloc_base], eax
 		test eax, eax
@@ -269,7 +301,7 @@ $malloc_:
 		mov eax, [$__malloc_base]
 		add eax, ecx
 		mov [$__malloc_end], eax
-		call $sys_brk_
+		call SYM($sys_brk)
 		cmp eax, [$__malloc_end]
 		je .15
 		jmp .13

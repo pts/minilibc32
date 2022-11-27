@@ -2,18 +2,21 @@ minilibc32: size-optimized, minimalistic libc for Linux i386
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 minilibc32 is an experimental, size-optimized and minimalistic libc (C
 runtime library) for writing programs in C targeting Linux i386 (executable
-program file format ELF32). Size-optimized means that the library functions
-are written by hand in assembly language, favoring shorter code size over
-execution speed.
+program file format ELF32) compiled with the OpenWatcom C compiler or GCC.
+Size-optimized means that the library functions are written by hand in
+assembly language, favoring shorter code size over execution speed.
 
-To try minilibc32 on Linux, install OpenWatcom, NASM, sstrip
+To try minilibc32 on Linux, install OpenWatcom, GCC, NASM, sstrip
 (https://github.com/BR903/ELFkickers/blob/master/sstrip/sstrip.c),
 and run `./compile.sh' from the cloned Git working directory. The libc
 machine code is in the created minilibc32.bin file (for size comparisons),
 and the test programs (Linux i386 ELF32 executable programs) are in the
 files test_*.ow.
 
-Byte sizes of i386 machine code of some libc functions in minilibc32:
+For production use, one of OpenWatcom or GCC (not both) will be enough.
+
+Byte sizes of i386 machine code of some libc functions in minilibc32 using
+the OpenWatcom __watcall calling convention:
 
 * isalpha(3): 11 bytes
 * isspace(3): 15 bytes
@@ -26,7 +29,7 @@ Byte sizes of i386 machine code of some libc functions in minilibc32:
 * _start entry point startup code calling main(...) + exit(2): 8 bytes
 * syscall trampoline __do_syscall3(...): 19 bytes
 * syscall (system call) wrappers (e.g. write(2)): 4 bytes each
-* total: 321 bytes
+* total of the above: 321 bytes
 
 i386 means in this context means not only the 32-bit Intel x86 (IA-32)
 instruction set architecture (ISA), but also the minimum CPU requirement
@@ -109,10 +112,14 @@ i386 system call ABI).
 Also note that for each new system call supported there is only 4 bytes
 added to the libc code: `push byte +nr' and `jmp short __do_syscall3'.
 
+minilibc32 was tested with GCC 4.8.4, GCC 6.3.0, GCC 7.5.0, and various
+versions of OpenWatcom released in 2022.
+
 Limitations and missing features from minilibc32:
 
-* Currently the OpenWatcom C compiler is the only supported one. There are
-  plans to add GCC support.
+* Currently the OpenWatcom C compiler and GCC are the only supported
+  compilers. There are plans to add Clang support (which should be easy,
+  it's similar enough to GCC).
 * envp and environ are not populated, there is no way to get the
   environment variables from C.
 * errno is not populated, there is no way to get syscall error numbers

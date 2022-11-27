@@ -5,20 +5,36 @@
 
 #undef __LIBC_OK
 
-#if defined(__WATCOMC__) && defined(_M_I386)
+#if defined(__WATCOMC__) && !defined(__GNUC__) && defined(_M_I386)
 #  define __LIBC_OK 1
 #else
-#  error Unsupported libc target.
+#  if defined(__GNUC__) && !defined(__WATCOMC__) && defined(__i386__)
+#    define __LIBC_OK 1
+#  else
+#    error Unsupported libc target.
+#  endif
 #endif
 #ifndef __LIBC_OK
 #  define __LIBC_OK 0
 #endif
 #if __LIBC_OK
 
-#define main main_from_libc  /* TODO(pts): Rename at assembler level, add symbol alias here. For OpenWatcom. */
-#define open libc_open  /* Avoid using the OpenWatcom C compiler using the `...' form. */
+#if defined(__GNUC__)
+#  define __LIBC_CALL __attribute__((regparm(3)))
+#  define __LIBC_FUNC(name, args) __LIBC_CALL name args __asm__(#name "__RP3__")
+#  define __LIBC_NORETURN __attribute__((noreturn, nothrow))
+#else
+#  define __LIBC_CALL __watcall
+#  define __LIBC_FUNC(name, args) __LIBC_CALL name args
+#  define __LIBC_NORETURN __declspec(aborts)
+#endif
 
-extern int __watcall main(int argc, char **argv);
+#define open open3  /* Avoid using the OpenWatcom C compiler using the `...' form. TODO(pts): Rename assembly symbols in OpenWatcom. */
+
+#ifdef __WATCOMC__
+#define main main_from_libc  /* TODO(pts): Rename at assembler level, add symbol alias here. For OpenWatcom. */
+extern int __LIBC_CALL main(int argc, char **argv);
+#endif
 
 #define NULL ((void*)0)
 
@@ -42,40 +58,48 @@ typedef int ssize_t;
 typedef unsigned mode_t;
 typedef long off_t;  /* Not implemented: 64-bit off_t (#define _FILE_OFFSET_BITS 64), off64_r, lseek64(2). */
 
-extern ssize_t write(int fd, const void *buf, size_t count);
+/* --- <stdarg.h> */
+
+#ifdef __GNUC__  /* !!! Also copy from __WATCOMC__ */
+typedef char *va_list;  /* i386 only. */
+#define va_start(ap, last) ap = ((char *)&(last)) + ((sizeof(last)+3)&~3)  /* i386 only. */
+#define va_arg(ap, type) (ap += (sizeof(type)+3)&~3, *(type *)(ap - ((sizeof(type)+3)&~3)))  /* i386 only. */
+#define va_copy(dest, src) (dest) = (src)  /* i386 only. */
+#define va_end(ap)  /* i386 only. */
+#endif
 
 /* --- <ctype.h> */
 
-extern int __watcall isalpha(int c);
-extern int __watcall isspace(int c);
-extern int __watcall isdigit(int c);
-extern int __watcall isxdigit(int c);
+extern int __LIBC_FUNC(isalpha, (int c));
+extern int __LIBC_FUNC(isspace, (int c));
+extern int __LIBC_FUNC(isdigit, (int c));
+extern int __LIBC_FUNC(isxdigit, (int c));
 
 /* --- <string.h> */
 
-extern size_t __watcall strlen(const char *s);
-extern char* __watcall strcpy(char *dest, const char *src);
-extern int __watcall strcmp(const char *s1, const char *s2);
-extern __declspec(aborts) void __watcall exit(int status);
+extern size_t __LIBC_FUNC(strlen, (const char *s));
+extern char* __LIBC_FUNC(strcpy, (char *dest, const char *src));
+extern int __LIBC_FUNC(strcmp, (const char *s1, const char *s2));
+extern __LIBC_NORETURN void __LIBC_FUNC(exit, (int status));
 
 /* --- <stdlib.h> */
 
-extern void* __watcall malloc(size_t size);
+extern void* __LIBC_FUNC(malloc, (size_t size));
 
 /* --- <fcntl.h> and <unistd.h> */
-extern void* __watcall sys_brk(void *addr);
+extern void* __LIBC_FUNC(sys_brk, (void *addr));
 /**/
-extern int __watcall creat(const char *pathname, mode_t mode);
-extern int __watcall open(const char *pathname, int flags, mode_t mode);
-extern int __watcall close(int fd);
+extern int __LIBC_FUNC(creat, (const char *pathname, mode_t mode));
+extern int __LIBC_FUNC(open, (const char *pathname, int flags, mode_t mode));
+extern int __LIBC_FUNC(close, (int fd));
 /**/
-extern ssize_t __watcall read(int fd, void *buf, size_t count);
-extern ssize_t __watcall write(int fd, const void *buf, size_t count);
-extern off_t __watcall lseek(int fd, off_t offset, int whence);
+extern ssize_t __LIBC_FUNC(read, (int fd, void *buf, size_t count));
+extern ssize_t __LIBC_FUNC(write, (int fd, const void *buf, size_t count));
+extern off_t __LIBC_FUNC(lseek, (int fd, off_t offset, int whence));
 /**/
-extern int __watcall unlink(const char *pathname);
-extern int __watcall remove(const char *pathname);  /* Same as unlink(...). */
-extern int __watcall rename(const char *oldpath, const char *newpath);
+extern int __LIBC_FUNC(unlink, (const char *pathname));
+extern int __LIBC_FUNC(remove, (const char *pathname));  /* Same as unlink(...). */
+extern int __LIBC_FUNC(rename, (const char *oldpath, const char *newpath));
 
 #endif  /* If __LIBC_OK */
 #endif  /* Ifndef _LIBC_H */

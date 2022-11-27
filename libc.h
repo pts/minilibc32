@@ -37,7 +37,7 @@ extern int __watcall main(int argc, char **argv);
 #define EXIT_SUCCESS 0  /* status values below. Can be 0..255. */
 #define EXIT_FAILURE 1
 
-typedef int size_t;
+typedef unsigned size_t;
 typedef int ssize_t;
 typedef unsigned mode_t;
 typedef long off_t;  /* Not implemented: 64-bit off_t (#define _FILE_OFFSET_BITS 64), off64_r, lseek64(2). */

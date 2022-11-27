@@ -1,0 +1,6 @@
+*~
+*.obj
+*.o
+*.ow
+/mininasm32.bin
+/test[1-9]ow

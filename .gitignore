@@ -4,3 +4,4 @@
 *.ow
 /mininasm32.bin
 /test[1-9]ow
+/regparm_demo.s

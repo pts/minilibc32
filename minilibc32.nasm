@@ -40,7 +40,8 @@
 		group DGROUP CONST CONST2 _DATA _BSS
 		section _TEXT
 %else
-		section .bss align=1
+		section .bss align=4
+		section .text align=1
 		section .text
 %define _BSS .bss  ; Section name.
 %endif

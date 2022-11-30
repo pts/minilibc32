@@ -244,12 +244,13 @@ sub print_nasm_header($$) {
   #print $outfh "\nsection .text\n";  # asm2nasm(...) will print int.
 }
 
-sub fix_label($$$) {
-  my($label, $bad_labels, $used_labels) = @_;
-  if ($label =~ m@\A[.]L(\w+)\Z(?!\n)@) {  # Typically: .LC0
+sub fix_label($$$$) {
+  my($label, $bad_labels, $used_labels, $local_labels) = @_;
+  if ($label =~ m@\A[.]L(\w+)\Z(?!\n)@) {  # Typically: .L1 and .LC0
     $label = "L_$1";
   } elsif ($label =~ m@\A([a-zA-Z_\@?][\w.\@?\$~#]*)\Z(?!\n)@) {  # Match NASM label.
-    $label = "F_$1";
+    my $label2 = "S_$1";
+    $label = exists($local_labels->{$label2}) ? $label2 : "F_$1";
   } else {
     push @$bad_labels, $label;
     return "?";
@@ -258,15 +259,15 @@ sub fix_label($$$) {
   $label
 }
 
-sub fix_labels($$$) {
-  my($s, $bad_labels, $used_labels) = @_;
+sub fix_labels($$$$) {
+  my($s, $bad_labels, $used_labels, $local_labels) = @_;
   die if !defined($s);
-  $s =~ s~([0-9][0-9a-zA-Z]*)|([.a-zA-Z_\@?][\w.\@?\$\~#]*)~ my $s2 = $2; my $label; defined($1) ? $1 : fix_label($2, $bad_labels, $used_labels) ~ge;
+  $s =~ s~([0-9][0-9a-zA-Z]*)|([.a-zA-Z_\@?][\w.\@?\$\~#]*)~ my $s2 = $2; my $label; defined($1) ? $1 : fix_label($2, $bad_labels, $used_labels, $local_labels) ~ge;
   $s
 }
 
-sub fix_ea($$$$$) {
-  my ($segreg, $displacement, $regs, $bad_labels, $used_labels) = @_;
+sub fix_ea($$$$$$) {
+  my ($segreg, $displacement, $regs, $bad_labels, $used_labels, $local_labels) = @_;
   # We could remove whitespace from $displacement and $regs, but we don't care.
   $regs =~ y@% @@d;
   $regs =~ s@,@+@;  # Only the first ','.
@@ -274,7 +275,7 @@ sub fix_ea($$$$$) {
   # We could do more syntax checks here.
   if ($displacement =~ m@[^ ]@) {
     $displacement = "+" . $displacement if length($regs);
-    $displacement = fix_labels($displacement, $bad_labels, $used_labels);
+    $displacement = fix_labels($displacement, $bad_labels, $used_labels, $local_labels);
   }
   $segreg = (defined($segreg) and length($segreg)) ? "$segreg:" : "";
   $segreg = "" if ($segreg eq "ss:" and $regs =~ m@bp@) or ($segreg eq "ds:" and $regs !~ m@bp@);  # Remove superfluous segment prefix. GNU as does it by default, NASM 0.98.39 doesn't.
@@ -301,6 +302,9 @@ sub as2nasm($$$$) {
   my $used_labels = {};
   my %defined_labels;
   my %externs;
+  my %local_labels;
+  my %global_labels;
+  my %define_when_defined;
   print $outfh "\nsection $section\n";
   while (<STDIN>) {
     if ($is_comment) {
@@ -329,7 +333,7 @@ sub as2nasm($$$$) {
         ++$errc;
         print STDERR "error: label outside section ($.): $_\n";
       }
-      my $label = fix_label($1, \@bad_labels, $used_labels);
+      my $label = fix_label($1, \@bad_labels, $used_labels, \%local_labels);
       if (length($section) == 1) {
         push @$rodata_strs, "$label:";
       } else {
@@ -337,6 +341,11 @@ sub as2nasm($$$$) {
         print $outfh "_start:\n" if $label eq "F__start";  # !! TODO(pts): Indicate the entry point smarter.
       }
       $defined_labels{$label} = 1;
+      if (exists($define_when_defined{$label})) {
+        my $label1 = $define_when_defined{$label};
+        print $outfh "$label1 equ $label\n";
+        $defined_labels{$label1} = 1;
+      }
     }
     if (m@\A[.]@) {
       if (m@\A[.](?:file "|size |type |loc |cfi_|ident ")@) {
@@ -345,9 +354,57 @@ sub as2nasm($$$$) {
         $section = $1;
         print $outfh "section $section\n";
       } elsif (m@\A[.]globl ([^\s:,]+)\Z@) {
-        my $label = fix_label($1, \@bad_labels, $used_labels);
+        my $label = fix_label($1, \@bad_labels, $used_labels, \%local_labels);
         print $outfh "global $label\n";
         print $outfh "global _start\n" if $label eq "F__start";  # !! TODO(pts): Indicate the entry point smarter.
+        if (exists($defined_labels{$label})) {
+          ++$errc;
+          print STDERR "error: label defined before .global ($.): $label\n";
+        }
+        if ($label =~ m@\AL_@) {
+          ++$errc;
+          print STDERR "error: local-prefix label cannot be declared .global ($.): $label\n";
+        } elsif ($label =~ m@\AS_@) {
+          ++$errc;
+          print STDERR "error: label already .local before .global ($.): $label\n";
+        } else {
+          $global_labels{$label} = 1;
+        }
+      } elsif (m@\A[.]local ([^\s:,]+)\Z@) {
+        my $label = fix_label($1, \@bad_labels, $used_labels, \%local_labels);
+        if (exists($defined_labels{$label})) {
+          ++$errc;
+          print STDERR "error: label defined before .local ($.): $label\n";
+        }
+        if ($label =~ m@\AL_@) {
+          ++$errc;
+          print STDERR "error: local-prefix label cannot be declared .local ($.): $label\n";
+        } elsif (exists($global_labels{$label})) {  # Must start with F_.
+          ++$errc;
+          print STDERR "error: label already .global before .local ($.): $label\n";
+        } elsif (exists($externs{$label})) {
+          ++$errc;
+          print STDERR "error: label already .extern before .local ($.): $label\n";
+        } elsif ($label =~ m@\AF_@ and exists($used_labels->{$label})) {
+          #++$errc;
+          #print STDERR "error: label already used as non-.local before .local ($.): $label\n";
+          my $label2 = $label;
+          die if $label2 !~ s@\AF_@S_@;
+          $define_when_defined{$label2} = $label;
+          if (exists($defined_labels{$label2})) {
+            print $outfh "$label equ $label2\n";
+            $defined_labels{$label} = 1;
+          } else {
+            # TODO(pts): Do an initial scanning pass to avoid this workaround. The workaround won't work for multiple input files with conflicting local labels.
+            $define_when_defined{$label2} = $label;
+          }
+          $local_labels{$label2} = 1;
+          $used_labels->{$label2} = 1;
+        } else {
+          die "fatal: assert: bad .local label: $label\n" if $label !~ s@\A[FS]_@S_@;
+          $local_labels{$label} = 1;
+        }
+        print $outfh ";local $label\n";  # NASM doesn't need it.
       } elsif (m@\A[.]section [.]text[.](?:unlikely|startup) *(?:,|\Z)@) {
         # GCC puts main to .text.startup.
         # !! What is .text.unlikely?
@@ -368,22 +425,35 @@ sub as2nasm($$$$) {
         # !! respect it.
         $section = "";
       } elsif (m@\A[.]extern ([^\s:,]+)\Z@) {  # GCC doesn't write these.
-        my $label = fix_label($1, \@bad_labels, $used_labels);
-        $externs{$label} = 1;
-      } elsif (m@\A[.]local ([^\s:,]+)\Z@) {  # !!!
-        my $label = fix_label($1, \@bad_labels, $used_labels);
-        print $outfh ";local $label\n";  # NASM doesn't need it.
+        my $label = fix_label($1, \@bad_labels, $used_labels, \%local_labels);
+        if ($label =~ m@\AL_@) {
+          ++$errc;
+          print STDERR "error: local-prefix label cannot be declared .extern ($.): $label\n";
+        } elsif ($label =~ m@\AS_@) {
+          ++$errc;
+          print STDERR "error: label already .local before .extern ($.): $label\n";
+        } else {
+          die "fatal: assert: bad .extern label: $label\n" if $label !~ m@\AF_@;
+          $externs{$label} = 1;
+        }
       } elsif (m@\A[.]comm ([^\s:,]+), *(0|[1-9]\d*), *(0|[1-9]\d*)\Z@) {
         if (length($section) <= 1) {
           ++$errc;
           print STDERR "error: .comm outside section ($.): $_\n";
+        } else {
+          # !! TODO(pts): Do a proper rearrangement of .comm within .bss based on alignment.
+          my ($size, $alignment) = ($2 + 0, $3 + 0);
+          my $label = fix_label($1, \@bad_labels, $used_labels, \%local_labels);
+          print $outfh "section .bss\n";
+          print $outfh "$label: resb $size\n";  # !! Allow multiple definintions (but not for .local). There is also the `common' directive for `nasm -f elf'.
+          $defined_labels{$label} = 1;
+          if (exists($define_when_defined{$label})) {
+            my $label1 = $define_when_defined{$label};
+            print $outfh "$label1 equ $label\n";
+            $defined_labels{$label1} = 1;
+          }
+          print $outfh "section $section\n";
         }
-        my ($size, $alignment) = ($2 + 0, $3 + 0);
-        my $label = fix_label($1, \@bad_labels, $used_labels);
-        print $outfh "section .bss\n";
-        print $outfh "$label: resb $size\n";  # !! Allow multiple definintions (but not for .local). There is also the `common' directive for `nasm -f elf'.
-        $defined_labels{$label} = 1;
-        print $outfh "section $section\n";
       } elsif (m@\A[.]align (0|[1-9]*)\Z@) {
         if (length($section) <= 1) {
           ++$errc;
@@ -393,7 +463,7 @@ sub as2nasm($$$$) {
         $unknown_directives{".align"} = 1;
       } elsif (m@\A[.](byte|value|long) (\S.*)\Z@) {  # !! 64-bit data? floating-point data?
         my $inst1 = $1;
-        my $expr = fix_labels($2, \@bad_labels, $used_labels);
+        my $expr = fix_labels($2, \@bad_labels, $used_labels, \%local_labels);
         if (length($section) <= 1) {
           ++$errc;
           print STDERR "error: .$inst1 outside section ($.): $_\n";
@@ -489,8 +559,8 @@ sub as2nasm($$$$) {
       my $tmp_arg;
       while (pos($_) < length($_)) {
         if (m@\G%(\w+|st\(\d+\))(?:, *|\Z)@gc) { push @args, ((substr($1, 0, 2) eq "st") ? fix_reg($1) : $1) }  # Register.
-        elsif (m@\G\$([^(),]+)(?:, *|\Z)@gc) { push @args, fix_labels($1, \@bad_labels, $used_labels) }  # Immediate.
-        elsif (m@\G(?:%([a-z]s) *: *)?(?:([^%(),]+)|([^%(),]*)\(([^()]+)\))(?:, *|\Z)@gc) { push @args, fix_ea($1, defined($2) ? $2 : $3, defined($2) ? "" : $4, \@bad_labels, $used_labels) }  # Effective address.
+        elsif (m@\G\$([^(),]+)(?:, *|\Z)@gc) { push @args, fix_labels($1, \@bad_labels, $used_labels, \%local_labels) }  # Immediate.
+        elsif (m@\G(?:%([a-z]s) *: *)?(?:([^%(),]+)|([^%(),]*)\(([^()]+)\))(?:, *|\Z)@gc) { push @args, fix_ea($1, defined($2) ? $2 : $3, defined($2) ? "" : $4, \@bad_labels, $used_labels, \%local_labels) }  # Effective address.
         elsif (m@\G([^,]*)(?:, *|\Z)@gc) {
           ++$errc;
           print STDERR "error: bad instruction argument ($.): $1\n";

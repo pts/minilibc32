@@ -454,13 +454,38 @@ sub as2nasm($$$$) {
           }
           print $outfh "section $section\n";
         }
-      } elsif (m@\A[.]align (0|[1-9]*)\Z@) {
+      } elsif (m@\A[.]align (0|[1-9]\d*)\Z@) {
         if (length($section) <= 1) {
           ++$errc;
           print STDERR "error: .align outside section ($.): $_\n";
+        } elsif ($section eq ".bss") {
+          # We'd need `alignb'. Does it make sense? We don't even support .bss directly.
+          print STDERR "error: .align in .bss ignored ($.): $_\n" if !exists($unknown_directives{".align/bss"});
+          $unknown_directives{".align/bss"} = 1;
+        } else {
+          my $alignment = $1 + 0;
+          if ($alignment & ($alignment - 1)) {
+            ++$errc;
+            print STDERR "error: alignment value not a power of 2 ($.): $_\n";
+          } elsif ($alignment > 1) {
+            # For some global variables (especially char arrays), GCC
+            # generates `.align 32'. It doesn't make sense, the user should
+            # add __attribute__((aligned(4))) to the declaration.
+            print STDERR "warning: alignment value larger than 4 capped to 4 ($.): $_\n" if $alignment > 4;
+            # Also we'd need to increase $data_alignment for elf.inc.nasm
+            # for $alignment > 4 to make any sense, and it's too late for
+            # that.
+            #
+            # !! TODO(pts): Do an initial scan for .align and .comm, and
+            # then set $data_alignment to 4, 8, 16 or 32. elf.inc.nasm
+            # supports up to 32 for ELF-32.
+            $alignment = 4 if $alignment > 4;
+            my $inst = ($section eq ".text") ? "nop" : "db 0";
+            print "align $alignment, $inst\n";
+            #print STDERR "warning: align ignored ($.): $_\n" if !exists($unknown_directives{".align"});  # !!
+            #$unknown_directives{".align"} = 1;
+          }
         }
-        print STDERR "warning: align ignored ($.): $_\n" if !exists($unknown_directives{".align"});  # !!
-        $unknown_directives{".align"} = 1;
       } elsif (m@\A[.](byte|value|long) (\S.*)\Z@) {  # !! 64-bit data? floating-point data?
         my $inst1 = $1;
         my $expr = fix_labels($2, \@bad_labels, $used_labels, \%local_labels);

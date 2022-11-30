@@ -33,7 +33,30 @@ void regsave(void) {
   __asm__ __volatile__ ("" : : : "eax", "ebx", "ecx", "edi", "esi", "edi", "ebp", "memory");
 }
 
-int uivar;
-
 extern void callee(void);
 void caller(void) { callee(); callee(); }
+
+int uivar[2];
+
+extern int extvar[3];
+
+const char* const days[] = {"Mon\xa""day", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"};
+
+char carr[] = {'H', 'e', 'l', 'l', 'o'};
+
+int *myarr[] = {&uivar[1]};
+
+unsigned short sarr[] = {0xffff, -2, -3};
+
+void inc_sarr_0(void) { ++sarr[0]; }
+
+int get_sarr_0(void) { return sarr[0]; }
+
+int get_sarr_1(void) { return sarr[1]; }
+
+void callf(void (*f)(void)) { f(); }
+
+void (*gf)(void);
+
+void callgf(void) { gf(); }
+

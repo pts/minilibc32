@@ -14,6 +14,9 @@ use strict;
 # !! Emit `push dword eax' without the `dword', keep it with `r/m, imm' args.
 # !! When linking, unify strings in `.section .rodata.str1.1,"aMS",@progbits,1' by tail.
 # !! What does it mean? .section        .text.unlikely,"ax",@progbits
+#
+# ./as2nasm.pl <mininasm.gcc75.s >t.nasm; nasm -O19 -f elf -o t.o t.nasm && ld --fatal-warnings -s -m elf_i386 -o t.prog t.o && sstrip.static t.prog && ls -ld t.prog && ./t.prog
+# ./as2nasm.pl <mininasm.gcc75.s >t.nasm; nasm -O19 -f bin -o t.prog t.nasm && chmod +x t.prog && ls -ld t.prog && ./t.prog
 
 # !! Was fuzz2.pl complete? Why not jb, jl, cmpxchg8b, fcmovl, prefetchw?
 my %force_nosize_insts = map { $_ => 1 } qw(
@@ -49,14 +52,48 @@ my %reg32_to_index = ('eax' => 0, 'ecx' => 1, 'edx' => 2, 'ebx' => 3, 'esp' => 4
 
 my %gp_regs = map { $_ => 1 } qw(al cl dl bl ah ch dh bh ax cx dx bx sp bp si di eax ecx edx ebx esp ebp esi edi);
 
+my %as_string_escape1 = ("b" => "\x08", "f" => "\x0c", "n" => "\x0a", "r" => "\x0d", "t" => "\x09", "v" => "\x0b");
+
 sub print_nasm_header($$) {
   my($outfh, $cpulevel) = @_;
   print $outfh "bits 32\n";
   print $outfh "cpu ${cpulevel}86\n" if $cpulevel >= 3 and $cpulevel <= 6;
-  print $outfh "section .text align=1\n";
-  print $outfh "section .bss align=4\n";
-  print $outfh "section .data align=4\n";
-  print $outfh "section .rodata align=4\n";
+  # !! better match https://www.nasm.us/xdoc/2.09.10/html/nasmdoc7.html
+#section .text    progbits  alloc   exec    nowrite  align=16
+#section .rodata  progbits  alloc   noexec  nowrite  align=4
+#section .lrodata progbits  alloc   noexec  nowrite  align=4
+#section .data    progbits  alloc   noexec  write    align=4
+#section .ldata   progbits  alloc   noexec  write    align=4
+#section .bss     nobits    alloc   noexec  write    align=4
+#section .lbss    nobits    alloc   noexec  write    align=4
+#section .tdata   progbits  alloc   noexec  write    align=4    tls
+#section .tbss    nobits    alloc   noexec  write    align=4    tls
+#section .comment progbits  noalloc noexec  nowrite  align=1
+#section other    progbits  alloc   noexec  nowrite  align=1
+
+  # !! These values are needed for as2nasm_test.sh
+  #print $outfh "section .text align=1\n";
+  #print $outfh "section .rodata align=4\n";
+  #print $outfh "section .data align=4\n";  # !!! Why is this .data aligned to 0x1000?
+  #print $outfh "section .bss align=4 nobits\n";
+
+  #print $outfh "section .text align=1\n";
+  #print $outfh "section .rodata align=1\n";
+  #print $outfh "section .data align=1\n";  # !!! Why is this .data aligned to 0x1000?
+  #print $outfh "section .bss align=1 nobits\n";
+  #print $outfh "%define _end\n";
+
+  if (0) {
+    print $outfh "section .text align=1\n";
+    print $outfh "section .rodata align=32\n";
+    print $outfh "section .data align=4\n";  # !!! Why is this .data aligned to 0x1000? if not .comm
+    print $outfh "section .bss align=32 nobits\n";
+    print $outfh "%define _end\n";
+  } else {
+    my $data_alignment = 4;
+    print $outfh "%include 'elf.inc.nasm'\n_elf_start 32, Linux, $data_alignment|sect_many|shentsize\n\n";
+  }
+
   print $outfh "section .text\n";
 }
 
@@ -111,7 +148,8 @@ sub as2nasm($$) {
   my %unknown_directives;
   my $errc = 0;
   my $is_comment = 0;
-  print $outfh "\nsection .text\n";
+  my $section = ".text";
+  print $outfh "\nsection $section\n";
   while (<STDIN>) {
     if ($is_comment) {
       next if !s@\A.*[*]/@@s;  # End of multiline comment.
@@ -120,9 +158,13 @@ sub as2nasm($$) {
     y@[\r\n]@@;
     s@/[*].*?[*]/@ @sg;
     $is_comment = 1 if s@/[*].*@@s;  # Start of multiline comment.
-    s@\s+@ @g;
-    s@\A[ ;]+@@;
-    s@[ ;]+\Z(?!\n)@@;
+    s@\A[\s;]+@@;
+    s@[\s;]+\Z(?!\n)@@;
+    if (!m@"@) {
+      s@\s+@ @g;
+    } else {
+      s@\s+|("(?:[^\\"]+|\\.)*")@ defined($1) ? $1 : " " @ge;  # Keep quoted spaces intact.
+    }
     if (s@;.*@@s) {
       ++$errc;
       # TODO(pts): Support multiple instructions per line.
@@ -131,20 +173,95 @@ sub as2nasm($$) {
     next if !length($_);
     my @bad_labels;
     if (s@\A([^\s:,]+): *@@) {
+      if (!length($section)) {
+        ++$errc;
+        print STDERR "error: label outside section ($.): $_\n";
+      }
       my $label = fix_label($1, \@bad_labels);
       print $outfh "$label:\n";
       print $outfh "_start:\n" if $label eq "F__start";  # !! TODO(pts): Indicate the entry point smarter.
-      next if !length($_);
     }
     if (m@\A[.]@) {
-      if (m@\A[.](?:file "|size |type )@) {
-        # Ignore this directive.
-      } elsif (m@\A[.](?:text|data|rodata)\Z@) {
-        print $outfh "section .text\n";
+      if (m@\A[.](?:file "|size |type |loc |cfi_)@) {
+        # Ignore this directive (.file, .size, .type).
+      } elsif (m@\A([.](?:text|data|rodata))\Z@) {
+        $section = $1;
+        print $outfh "section $section\n";
       } elsif (m@\A[.]globl ([^\s:,]+)\Z@) {
         my $label = fix_label($1, \@bad_labels);
         print $outfh "global $label\n";
-        print $outfh "global _start:\n" if $label eq "F__start";  # !! TODO(pts): Indicate the entry point smarter.
+        print $outfh "global _start\n" if $label eq "F__start";  # !! TODO(pts): Indicate the entry point smarter.
+      } elsif (m@\A[.]section [.]text[.](?:unlikely|startup) *(?:,|\Z)@) {
+        # GCC puts main to .text.startup.
+        # !! What is .text.unlikely?
+        $section = ".text";  # !! Any better?
+        print $outfh "section $section\n";
+      } elsif (m@\A[.]section [.]rodata[.]str1[.]1 *(?:,|\Z)@) {
+        # !! Merge string constants which end like each other. How do we spot the beginning?
+        $section = ".rodata";  # !! Any better?
+        print $outfh "section $section\n";
+      } elsif (m@\A[.]section [.]rodata\Z@) {
+        $section = ".rodata";
+        print $outfh "section $section\n";
+      } elsif (m@\A[.]section [.]note[.]GNU-stack[,]@) {
+        # Non-executable stack marker: .section .note.GNU-stack,"",@progbits
+        # !! respect it.
+        $section = "";
+      } elsif (m@\A[.]extern ([^\s:,]+)\Z@) {
+        my $label = fix_label($1, \@bad_labels);
+        #print $outfh "extern $label\n";  # !! TODO(pts): Conflicts with `global main' (e.g. main)?
+        print STDERR "warning: extern ignored ($.): $_\n";
+      } elsif (m@\A[.]local ([^\s:,]+)\Z@) {
+        my $label = fix_label($1, \@bad_labels);
+        print $outfh ";local $label\n";  # NASM doesn't need it.
+      } elsif (m@\A[.]comm ([^\s:,]+), *(0|[1-9]\d*), *(0|[1-9]\d*)\Z@) {
+        if (!length($section)) {
+          ++$errc;
+          print STDERR "error: .comm outside section ($.): $_\n";
+        }
+        my ($size, $alignment) = ($2 + 0, $3 + 0);
+        my $label = fix_label($1, \@bad_labels);
+        print $outfh "section .bss\n";
+        print $outfh "$label: resb $size\n";  # !! Allow multiple definintions (but not for .local). There is also the `common' directive for `nasm -f elf'.
+        print $outfh "section $section\n";
+      } elsif (m@\A[.]align (0|[1-9]*)\Z@) {
+        if (!length($section)) {
+          ++$errc;
+          print STDERR "error: .align outside section ($.): $_\n";
+        }
+        print STDERR "warning: align ignored ($.): $_\n" if !exists($unknown_directives{".align"});  # !!
+        $unknown_directives{".align"} = 1;
+      } elsif (m@\A[.](byte|value|long) (\S.*)\Z@) {  # !! 64-bit data? floating-point data?
+        my $inst1 = $1;
+        my $expr = fix_labels($2, \@bad_labels);
+        if (!length($section)) {
+          ++$errc;
+          print STDERR "error: .$inst1 outside section ($.): $_\n";
+        }
+        my $inst = $inst1 eq "byte" ? "db" : $inst1 eq "value" ? "dw" : $inst1 eq "long" ? "dd" : "d?";
+        print $outfh "$inst $expr\n";
+      } elsif (m@\A[.]((string)|ascii) "((?:[^\\"]+|\\.)*)"\Z@s) {
+        my($inst1, $inst2, $data) = ($1, $2, $3);
+        if (!length($section)) {
+          ++$errc;
+          print STDERR "error: .$inst1 outside section ($.): $_\n";
+        }
+        # GNU as 2.30 does the escaping like this.
+        $data =~ s@\\(?:([0-3][0-7]{2})|[xX]([0-9a-fA-F]{1,})|([bfnrtv])|(.))@
+            defined($1) ? chr(oct($1)) :
+            defined($2) ? chr(hex(substr($2, -2))) :
+            defined($3) ? $as_string_escape1{$3} :
+            $4 @ges;
+        $data .= "\0" if defined($inst2);
+        # !! Merge strings ($data) by suffix.
+        if (length($data)) {
+          $data =~ s@([\x00-\x1f\\'\x7f-\xff])@ sprintf("', %d, '", ord($1)) @ges;
+          $data = "'$data'";
+          $data =~ s@, ''(?=, )@@g;  # Optimization.
+          $data =~ s@\A'', @@;  # Optimization.
+          $data =~ s@, ''\Z@@;  # Optimization.
+          print $outfh "db $data\n";
+        }
       } else {
         die "assert: missing directive: $_\n" if !m@\A([.][^ ]+)@;
         my $d = $1;
@@ -155,6 +272,10 @@ sub as2nasm($$) {
         }
       }
     } elsif (s@\A([a-z][a-z0-9]*) *@@) {
+      if (!length($section)) {
+        ++$errc;
+        print STDERR "error: instruction outside section ($.): $_\n";
+      }
       my $inst = $1;
       $inst = "wait" if $inst eq "fwait";
       while (exists($prefix_insts{$inst})) {
@@ -164,7 +285,7 @@ sub as2nasm($$) {
         $inst = "wait" if $inst eq "fwait";
       }
       if (!length($inst)) {
-        next if !length($_);
+        goto check_labels if !length($_);
         $inst = "?";
         ++$errc;
         print STDERR "error: no instruction after prefix ($.): $_\n";
@@ -228,10 +349,10 @@ sub as2nasm($$) {
         my $a0 = $args[0];
         if (@args == 1 and exists($reg32_to_index{$args[0]})) {
           print $outfh sprintf("db 0x0f, 0x1f, 0x%02x  ; nop %s\n", 0xc0 | $reg32_to_index{$args[0]}, $args[0]);
-          next
+          goto check_labels
         } elsif (@args == 1 and exists($reg32_to_index{"e$args[0]"})) {
           print $outfh sprintf("db 0x66, 0x0f, 0x1f, 0x%02x  ; nop %s\n", 0xc0 | $reg32_to_index{"e$args[0]"}, $args[0]);
-          next
+          goto check_labels
         } else {
           $inst .= "?";
           @args = reverse(@args);
@@ -257,7 +378,7 @@ sub as2nasm($$) {
         ($inst, $instwd) = ("fisttp", " qword") if $inst eq "fisttpll";
         if (@args == 1 and $args[0] eq "[ebx]") {  # Just a quick hack for testing. Proper 32-bit effective address encoding would be needed, also for `nop'.
           print $outfh sprintf("db 0x%02x, 0x0b  ; $inst$instwd $args[0]\n", $instwd eq " word" ? 0xdf : $instwd eq " dword" ? 0xdb : 0xdd);
-          next
+          goto check_labels
         }
         # NASM 0.98.39 generates the machine bytes of the wrokg size (qword,
         # dword and word mixed). This one has been fixed in NASM 2.13.02 (or
@@ -275,7 +396,14 @@ sub as2nasm($$) {
       $instwd = "" if @args and length($instwd) and @args <= 2 and (
           exists($gp_regs{$args[0]}) or (@args == 2 and !defined($arg1_prefix) and exists($gp_regs{$args[1]})));
       print $outfh "$inst$instwd$args\n";
+    } elsif (!length($_)) {
+    } elsif ($_ eq "#APP" or $_ eq "#NO_APP") {  # Ignore, preprocessor enable/disabled.
+      # https://stackoverflow.com/a/73317832
+    } else {
+      ++$errc;
+      print STDERR "error: instruction or directive expected ($.): $_\n";
     }
+   check_labels:
     for my $label (@bad_labels) {
       ++$errc;
       print STDERR "error: bad label syntax ($.): $label\n";
@@ -291,4 +419,5 @@ my $errc = as2nasm(\*STDIN, $outfh);
 print $outfh "extern F_callee\n";  # !! Autodetect.
 print $outfh "extern F_gf\n";  # !! Autodetect.
 die "fatal: $errc error@{[qq(s)x($errc!=1)]} during as2nasm translation\n" if $errc;
+print $outfh "\n_end\n";  # elf.inc.nasm
 print $outfh "\n; __END__\n";

@@ -224,7 +224,6 @@ my %as_string_escape1 = ("b" => "\x08", "f" => "\x0c", "n" => "\x0a", "r" => "\x
 sub print_nasm_header($$) {
   my($outfh, $cpulevel) = @_;
   print $outfh "bits 32\n";
-  print $outfh "cpu ${cpulevel}86\n" if $cpulevel >= 3 and $cpulevel <= 6;
   # !! better match https://www.nasm.us/xdoc/2.09.10/html/nasmdoc7.html
 #section .text    progbits  alloc   exec    nowrite  align=16
 #section .rodata  progbits  alloc   noexec  nowrite  align=4
@@ -258,8 +257,11 @@ sub print_nasm_header($$) {
     print $outfh "%define _end\n";
   } else {
     my $data_alignment = 4;
-    print $outfh "%include 'elf.inc.nasm'\n_elf_start 32, Linux, $data_alignment|sect_many|shentsize\n\n";
+    print $outfh "%include 'elf.inc.nasm'\n%define _ELF_PROG_CPU_UNCHANGED\n_elf_start 32, Linux, $data_alignment|sect_many|shentsize\n\n";
   }
+  # After elf.inc.nasm, because it may modify the CPU level.
+  my $cpulevel_str = ($cpulevel > 6 ? "" : $cpulevel >= 3 ? "${cpulevel}86" : "386");  # "prescott" would also work for $cpulevel > 6;
+  print $outfh "cpu $cpulevel_str\n" if length($cpulevel_str);
 
   print $outfh "section .text\n";
 }

@@ -1,6 +1,6 @@
 #! /usr/bin/perl -w
 #
-# as2nasm.pl: convert from GNU as (AT&T) syntax to NASM syntax
+# as2nasm.pl: convert from i386 GNU as (AT&T) syntax to NASM syntax
 # by pts@fazekas.hu at Tue Nov 29 01:46:33 CET 2022
 #
 # !! do we need to reorder global variables by alignment (or does GCC already emit in the correct, decreasing order -- not for .comm)?
@@ -9,8 +9,8 @@
 # !! Support `gcc -masm=intel' and `clang --x86-asm-syntax=intel'.
 # !! What does it mean? .section        .text.unlikely,"ax",@progbits
 #
-# ./as2nasm.pl <mininasm.gcc75.s >t.nasm; nasm -O19 -f elf -o t.o t.nasm && ld --fatal-warnings -s -m elf_i386 -o t.prog t.o && sstrip.static t.prog && ls -ld t.prog && ./t.prog
-# ./as2nasm.pl <mininasm.gcc75.s >t.nasm; nasm -O19 -f bin -o t.prog t.nasm && chmod +x t.prog && ls -ld t.prog && ./t.prog
+# ./as2nasm.pl -march=i386 -o t.nasm mininasm.gcc75.s ^^ nasm -O19 -f elf -o t.o t.nasm && ld --fatal-warnings -s -m elf_i386 -o t.prog t.o && sstrip t.prog && ls -ld t.prog && ./t.prog
+# ./as2nasm.pl -march=i386 -o t.nasm mininasm.gcc75.s && nasm -O19 -f bin -o t.prog t.nasm && chmod +x t.prog && ls -ld t.prog && ./t.prog
 #
 
 BEGIN { $^W = 1 }
@@ -348,7 +348,7 @@ sub fix_reg($) {
 #
 # !! Rename local labels (L_* and also non-.globl F_) by file: L1_* F2_*.
 sub as2nasm($$$$$$) {
-  my($infh, $outfh, $rodata_strs, $undefineds, $define_when_defined, $common_by_label) = @_;
+  my($srcfh, $outfh, $rodata_strs, $undefineds, $define_when_defined, $common_by_label) = @_;
   my %unknown_directives;
   my $errc = 0;
   my $is_comment = 0;
@@ -359,7 +359,7 @@ sub as2nasm($$$$$$) {
   my %local_labels;
   my %global_labels;
   print $outfh "\nsection $section\n";
-  while (<STDIN>) {
+  while (<$srcfh>) {
     if ($is_comment) {
       next if !s@\A.*[*]/@@s;  # End of multiline comment.
       $is_comment = 0;
@@ -544,7 +544,7 @@ sub as2nasm($$$$$$) {
             # supports up to 32 for ELF-32.
             $alignment = 4 if $alignment > 4;
             my $inst = ($section eq ".text") ? "nop" : "db 0";
-            print "align $alignment, $inst\n";
+            print $outfh "align $alignment, $inst\n";
             #print STDERR "warning: align ignored ($.): $_\n" if !exists($unknown_directives{".align"});  # !!
             #$unknown_directives{".align"} = 1;
           }
@@ -752,16 +752,66 @@ sub as2nasm($$$$$$) {
   $errc
 }
 
-my $outfh = \*STDOUT;
-my $cpulevel = 7;  # !! Override, e.g. -march=i386.
-my $do_merge_strings = 1;
-my $rodata_strs = $do_merge_strings ? [] : undef;
+# --- main().
+
+if (!@ARGV or $ARGV[0] eq "--help") {
+  print STDERR "as2nasm.pl: convert from i386 GNU as (AT&T) syntax to NASM syntax\n",
+               "This is free software, GNU GPL >=2.0. There is NO WARRANTY. Use at your risk.\n",
+               "Usage: $0 [<flags>...] -o <output.nasm> <input.s>\n";
+               "Input syntax support is mostly limited to `gcc -s' output.\n";
+  exit(!@ARGV);
+}
+
+my $i = 0;
+my $cpulevel = 7;
+my $outfn;
+my $do_merge_tail_strings = 1;
+# TODO(pts): Add flag to inline elf.inc.nasm.
+while ($i < @ARGV) {
+  my $arg = $ARGV[$i++];
+  if ($arg eq "--") {
+    last
+  } elsif (substr($arg, 0, 1) ne "-") {
+    --$i; last;
+  } elsif ($arg eq "-mmerge-tail-strings") {
+    $do_merge_tail_strings = 1;
+  } elsif ($arg eq "-mno-merge-tail-strings") {
+    $do_merge_tail_strings = 0;
+  } elsif ($arg eq "-m32" or $arg eq "--32") {
+  } elsif ($arg =~ m@-march=(.*)\Z(?!\n)@) {
+    my $value = lc($1);
+    if ($value eq "i386") { $cpulevel = 3 }
+    elsif ($value eq "i486") { $cpulevel = 4 }
+    elsif ($value eq "i586") { $cpulevel = 5 }
+    elsif ($value eq "i686") { $cpulevel = 6 }
+    else { $cpulevel = 7 }  # Any instructions allowed.
+  } elsif ($arg eq "-o" and $i == @ARGV) {
+    die "fatal: missing value for flag: $arg\n";
+  } elsif ($arg eq "-o") {  # Typically .nasm extension.
+    $outfn = $ARGV[$i++];
+  } else {
+    die "fatal: unknown flag: $arg\n";
+  }
+}
+die "fatal: missing source file\n" if $i >= @ARGV;
+die "fatal: too many source files, only one allowed\n" if $i > @ARGV + 1;
+my $srcfn = $ARGV[$i];
+die "fatal: missing NASM-assembly output file\n" if !defned($outfn);
+
+my $srcfh;
+die "fatal: open assembly source file: $srcfn: $!\n" if !open($srcfh, "<", $srcfn);
+binmode($srcfh);
+my $outfh;
+die "fatal: open NASM-assembly output file: $outfn: $!\n" if !open($outfh, ">", $outfn);
+binmode($outfh);
+
+my $rodata_strs = $do_merge_tail_strings ? [] : undef;
 my $undefineds = {};
 my $define_when_defined = {};  # This won't work for multiple source files.
 my $common_by_label = {};
 print_nasm_header($outfh, $cpulevel);
-my $errc = as2nasm(\*STDIN, $outfh, $rodata_strs, $undefineds, $define_when_defined, $common_by_label);
-print "\nsection .rodata\n" if $rodata_strs and @$rodata_strs;
+my $errc = as2nasm($srcfh, $outfh, $rodata_strs, $undefineds, $define_when_defined, $common_by_label);
+print $outfh "\nsection .rodata\n" if $rodata_strs and @$rodata_strs;
 print_merged_strings_in_strdata($outfh, $rodata_strs, 1);
 if (%$undefineds) {
   print $outfh "\n";
@@ -773,3 +823,5 @@ print_commons($outfh, $common_by_label, $define_when_defined);  # !! Do it in th
 die "fatal: $errc error@{[qq(s)x($errc!=1)]} during as2nasm translation\n" if $errc;
 print $outfh "\n_end\n";  # elf.inc.nasm
 print $outfh "\n; __END__\n";
+die "fatal: error writing NASM-assembly output\n" if !close($outfh);
+close($srcfh);

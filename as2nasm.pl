@@ -1,4 +1,8 @@
-#! /usr/bin/perl -w
+#!/bin/sh --
+eval 'PERL_BADLANG=x;export PERL_BADLANG;exec perl -x "$0" "$@";exit 1'
+#!perl  # Start marker used by perl -x.
++0 if 0;eval("\n\n\n\n".<<'__END__');die$@if$@;__END__
+
 #
 # as2nasm.pl: convert from i386 GNU as (AT&T) syntax to NASM syntax
 # by pts@fazekas.hu at Tue Nov 29 01:46:33 CET 2022

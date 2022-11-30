@@ -305,6 +305,7 @@ sub as2nasm($$$$) {
   my %local_labels;
   my %global_labels;
   my %define_when_defined;
+  my $commons = [];
   print $outfh "\nsection $section\n";
   while (<STDIN>) {
     if ($is_comment) {
@@ -443,16 +444,20 @@ sub as2nasm($$$$) {
         } else {
           # !! TODO(pts): Do a proper rearrangement of .comm within .bss based on alignment.
           my ($size, $alignment) = ($2 + 0, $3 + 0);
-          my $label = fix_label($1, \@bad_labels, $used_labels, \%local_labels);
-          print $outfh "section .bss\n";
-          print $outfh "$label: resb $size\n";  # !! Allow multiple definintions (but not for .local). There is also the `common' directive for `nasm -f elf'.
-          $defined_labels{$label} = 1;
-          if (exists($define_when_defined{$label})) {
-            my $label1 = $define_when_defined{$label};
-            print $outfh "$label1 equ $label\n";
-            $defined_labels{$label1} = 1;
+          if ($alignment & ($alignment - 1)) {
+            ++$errc;
+            print STDERR "error: alignment value not a power of 2 ($.): $_\n";
+            $alignment = 1;
+          } elsif ($alignment < 2) {
+            $alignment = 1;
+          } elsif ($alignment > 4) {
+            # See the comments at .align why.
+            print STDERR "warning: alignment value larger than 4 capped to 4 ($.): $_\n" if $alignment > 4;
+            $alignment = 4;
           }
-          print $outfh "section $section\n";
+          my $label = fix_label($1, \@bad_labels, $used_labels, \%local_labels);
+          $defined_labels{$label} = 1;
+          push @$commons, [$label, $size, $alignment];
         }
       } elsif (m@\A[.]align (0|[1-9]\d*)\Z@) {
         if (length($section) <= 1) {
@@ -669,12 +674,77 @@ sub as2nasm($$$$) {
   }
   if (0 and $rodata_strs and @$rodata_strs) {  # For debugging: don't merge (optimize) anything.
     $section = ".rodata";
-    print $outfh "section $section\n";
+    print $outfh "\nsection $section\n";
     for my $str (@$rodata_strs) {
       $str .= "\n";
       print $outfh $str;
     }
     @$rodata_strs = ();
+  }
+  if (@$commons) {  # !! Do it in the caller, after aggregating from multiple source files.
+    print $outfh "\n;section $section  ; common\n";
+    # (alignment decreasing, size decreasing, name lexicographically increasing).
+    @$commons = sort { $b->[2] <=> $a->[2] or $b->[1] <=> $a->[1] or $a->[0] cmp $b->[0] } @$commons;
+    my %common_by_label;
+    my @commons2;
+    for my $tuple (@$commons) {
+      my($label, $size, $alignment) = @$tuple;
+      my $value = "$size:$alignment";
+      if (exists($common_by_label{$label})) {
+        if ($common_by_label{$label} ne $value) {
+          ++$errc;
+          print STDERR "error: common mismatch for $label: $common_by_label{$label} vs $label\n";
+        }
+      } else {
+        push @commons2, $tuple;
+        $common_by_label{$label} = $tuple;
+      }
+    }
+    $section = ".bss";
+    print $outfh "section .bss  ; common\n";
+    # NASM 0.98.39 and 0.99.06 report phase errors with if the .nasm file
+    # contains forward-referenced `common' directives, even without the equ
+    # hack below. It works with NASM 2.13.02, but only without the `equ'
+    # hack: with `equ' it's Segmentation fault when running.
+    #
+    # Thus we emit the .bss manually even for `nasm -f elf'. Thus, without
+    # the `common', it's not possible for many .c source file to say `int
+    # var;'. One of them must have `int var;', the others must have `extern
+    # int var;'.
+    if (0) {
+      print $outfh "%ifidn __OUTPUT_FORMAT__, elf\n";
+      for my $tuple (@commons2) {
+        my($label, $size, $alignment) = @$tuple;
+        #print $outfh "common $label $size:$alignment\n";
+        #if (exists($define_when_defined{$label})) {
+        #  my $label1 = $define_when_defined{$label};
+        #  print $outfh "$label1 equ $label\n";
+        #  $defined_labels{$label1} = 1;
+        #}
+        if (exists($define_when_defined{$label})) {
+          my $label1 = $define_when_defined{$label};
+          #print $outfh "$label1 equ $label\n";
+          $defined_labels{$label1} = 1;
+          print $outfh "common $label1 $size:$alignment\n";
+        } else {
+          print $outfh "common $label $size:$alignment\n";
+        }
+      }
+      print $outfh "%else  ; ifidn __OUTPUT_FORMAT__, elf\n";
+    }
+    for my $tuple (@commons2) {
+      my($label, $size, $alignment) = @$tuple;
+      print $outfh "alignb $alignment\n" if $alignment > 1;
+      print $outfh "$label: resb $size  ; align=$alignment\n";
+      if (exists($define_when_defined{$label})) {
+        my $label1 = $define_when_defined{$label};
+        print $outfh "$label1 equ $label\n";
+        $defined_labels{$label1} = 1;
+      }
+    }
+    if (0) {
+      print $outfh "%endif ; ifidn __OUTPUT_FORMAT__, elf\n";
+    }
   }
   for my $label (keys(%$used_labels)) {
     $undefineds->{$label} = 1 if !exists($defined_labels{$label});
@@ -692,7 +762,7 @@ my $rodata_strs = $do_merge_strings ? [] : undef;
 my $undefineds = {};
 print_nasm_header($outfh, $cpulevel);
 my $errc = as2nasm(\*STDIN, $outfh, $rodata_strs, $undefineds);
-print "section .rodata\n" if $rodata_strs and @$rodata_strs;
+print "\nsection .rodata\n" if $rodata_strs and @$rodata_strs;
 print_merged_strings_in_strdata($outfh, $rodata_strs, 1);
 if (%$undefineds) {
   print $outfh "\n";

@@ -11,8 +11,6 @@ use strict;
 # !! doc: It's not the goal to get bitwise identical machine code output (but it's nice to have if easy), but to get same-size instructions wherever possible, maybe different encoding (e.g. `mov eax, ebx' has 2 encodings).
 # !! Treat nasm warnings as errors (everything on stderr).
 # !! Support `gcc -masm=intel' and `clang --x86-asm-syntax=intel'.
-# !! Emit `push dword eax' without the `dword', keep it with `r/m, imm' args.
-# !! When linking, unify strings in `.section .rodata.str1.1,"aMS",@progbits,1' by tail.
 # !! What does it mean? .section        .text.unlikely,"ax",@progbits
 #
 # ./as2nasm.pl <mininasm.gcc75.s >t.nasm; nasm -O19 -f elf -o t.o t.nasm && ld --fatal-warnings -s -m elf_i386 -o t.prog t.o && sstrip.static t.prog && ls -ld t.prog && ./t.prog
@@ -139,12 +137,147 @@ sub fix_reg($) {
   $reg
 }
 
+sub print_merged_strings_in_strdata($$) {
+  my($outfh, $rodata_strs) = @_;
+  return if !$rodata_strs or !@$rodata_strs;
+  my $strdata = join("\n", @$rodata_strs);
+  # Test data: $strdata = "foo:\ndb 'ello', 0\ndb 0\ndb 'oth'\nmer:\ndb 'er', 1\ndb 2\ndb 0\ndb 3\ndb 0\ndb 4\ndb 'hell'\nbar:\ndb 'o', 0\nbaz:\ndb 'lo', 0, 'ello', 0, 'hell', 0, 'foo', ', ', 0, 15, 3, 0\nlast:";  @$rodata_strs = split(/\n/, $strdata);
+  my $ofs = 0;
+  my @labels;
+  for my $str (@$rodata_strs) {
+    if ($str =~ m@db @) {
+      pos($str) = 0;
+      while ($str =~ m@\d+|'([^']*)'@g) { $ofs += defined($1) ? length($1) : 1 }
+    } elsif ($str =~ m@([^\s:,]+):\Z@) {
+      push @labels, [$ofs, $1];
+      #print STDERR ";;old: $1 equ strs+$ofs\n";
+    } else {
+      die "fatal: assert: unexpected strs line: $str\n";
+    }
+  }
+  $strdata = join("\n", grep { !m@:\Z@ } @$rodata_strs);
+  $strdata .= "\n";
+  # $strdata already has very strict syntax (because we have generated its
+  # dbs), so we can do these regexp substitutions below safely.
+  $strdata =~ s@([^:])\ndb @$1, @g;
+  $strdata = "db " if !length($strdata);
+  die "fatal: assert: missing db" if $strdata !~ m@\Adb@;
+  die "fatal: assert: too many dbs" if $strdata =~ m@.db@s;
+  $strdata =~ s@^db @db , @mg;
+  $strdata =~ s@, 0(?=, )@, 0\ndb @g;  # Split lines on NUL.
+  my $ss = 0;
+  while (length($strdata) != $ss) {
+    $ss = length($strdata);
+    $strdata =~ s@'([^']*)'(?:, '([^']*)')?@ my $x = defined($2) ? $2 : ""; "'$1$x'" @ge;
+  }
+  chomp($strdata);
+  @$rodata_strs = split(/\n/, $strdata);
+  my @sorteds;
+  {
+    my $i = 0;
+    for my $str (@$rodata_strs) {
+      my $rstr = reverse($str);
+      substr($rstr, -3) = "";  # Remove "db ".
+      substr($rstr, 0, 3) = "";  # Remove "0, ".
+      $rstr =~ s@' ,\Z@@;
+      push @sorteds, [$rstr, $i];
+      ++$i;
+    }
+  }
+  @sorteds = sort { $a->[0] cmp $b->[0] or $a->[1] <=> $b->[1] } @sorteds;
+  my %mapi;
+  for (my $i = 0; $i < $#sorteds; ++$i) {
+    my $rstri = $sorteds[$i][0];
+    my $rstri1 = $sorteds[$i + 1][0];
+    if (length($rstri1) >= length($rstri) and substr($rstri1, 0, length($rstri)) eq $rstri) {
+      $mapi{$sorteds[$i][1]} = $sorteds[$i + 1][1];
+    }
+  }
+  my @ofss;
+  my @oldofss;
+  #%mapi = ();  # For debugging: don't merge anything.
+  {
+    my $i = 0;
+    my $ofs = 0;
+    my $oldofs = 0;
+    my @sizes;
+    for my $str (@$rodata_strs) {
+      pos($str) = 0;
+      my $size = 0;
+      while ($str =~ m@\d+|'([^']*)'@g) { $size += defined($1) ? length($1) : 1 }
+      push @sizes, $size;
+      push @oldofss, $oldofs;
+      $oldofs += $size;
+      if (exists($mapi{$i})) {
+        my $j = $mapi{$i};
+        $j = $mapi{$j} while exists($mapi{$j});
+        $mapi{$i} = $j;
+        #print STDERR ";$i: ($str) -> ($rodata_strs->[$j]}\n";
+        push @ofss, undef;
+      } else {
+        push @ofss, $ofs;
+        $ofs += $size;
+        #print STDERR "$str\n";
+      }
+      ++$i;
+    }
+    if (%mapi) {
+      for ($i = 0; $i < @$rodata_strs; ++$i) {
+        my $j = $mapi{$i};
+        $ofss[$i] = $ofss[$j] + $sizes[$j] - $sizes[$i] if defined($j) and !defined($ofss[$i]);
+      }
+    }
+    push @ofss, $ofs;
+    push @oldofss, $oldofs;
+  }
+  {
+    for my $str (@$rodata_strs) {
+      die "fatal: assert: missing db-comma\n" if $str !~ s@\Adb , @db @;  # Modify in place.
+      # !! if TODO(pts): length($str) > 500, then split to several `db's.
+      $str .= "\n";
+    }
+    print $outfh "section .rodata\n";
+    print $outfh "strs:\n";
+    my $i = 0;
+    my $pi = 0;
+    for my $pair (@labels) {
+      my($lofs, $label) = @$pair;
+      ++$i while $i + 1 < @oldofss and $oldofss[$i + 1] <= $lofs;
+      die "fatal: assert: bad oldoffs\n" if $i >= @oldofss;
+      my $ofs = $lofs - $oldofss[$i] + $ofss[$i];
+      for (; $pi < $i; ++$pi) {
+        #print STDERR "$rodata_strs->[$pi]\n" if !exists($mapi{$pi});
+        print $outfh $rodata_strs->[$pi] if !exists($mapi{$pi});
+      }
+      if ($lofs != $oldofss[$i] or exists($mapi{$i})) {
+        if (exists($mapi{$i})) {
+          # !! TODO(pts): Find a later, closer label, report relative offset there.
+          #print STDERR "$label equ strs+$ofs  ; old=$lofs\n";
+          print $outfh "$label equ strs+$ofs  ; old=$lofs\n";
+        } else {
+          my $dofs = $lofs - $oldofss[$i];
+          #print $outfh "$label equ \$+$dofs\n";
+          print STDERR "$label equ \$+$dofs\n";
+        }
+      } else {
+        #print STDERR "$label:\n";
+        print $outfh "$label:\n";
+      }
+    }
+    for (; $pi < @$rodata_strs; ++$pi) {
+      #print STDERR "$rodata_strs->[$pi]\n" if !exists($mapi{$pi});
+      print $outfh $rodata_strs->[$pi] if !exists($mapi{$pi});
+    }
+  }
+  @$rodata_strs = ();
+}
+
 # Converts GNU as syntax to NASM 0.98.39 syntax, Supports only a small
 # subset of GNU as syntax, mostly the one generated by GCC.
 #
 # !! Rename local labels (L_* and also non-.globl F_) by file: L1_* F2_*.
-sub as2nasm($$) {
-  my($infh, $outfh) = @_;
+sub as2nasm($$$) {
+  my($infh, $outfh, $rodata_strs) = @_;
   my %unknown_directives;
   my $errc = 0;
   my $is_comment = 0;
@@ -178,8 +311,12 @@ sub as2nasm($$) {
         print STDERR "error: label outside section ($.): $_\n";
       }
       my $label = fix_label($1, \@bad_labels);
-      print $outfh "$label:\n";
-      print $outfh "_start:\n" if $label eq "F__start";  # !! TODO(pts): Indicate the entry point smarter.
+      if (length($section) == 1) {
+        push @$rodata_strs, "$label:";
+      } else {
+        print $outfh "$label:\n";
+        print $outfh "_start:\n" if $label eq "F__start";  # !! TODO(pts): Indicate the entry point smarter.
+      }
     }
     if (m@\A[.]@) {
       if (m@\A[.](?:file "|size |type |loc |cfi_)@) {
@@ -197,9 +334,12 @@ sub as2nasm($$) {
         $section = ".text";  # !! Any better?
         print $outfh "section $section\n";
       } elsif (m@\A[.]section [.]rodata[.]str1[.]1 *(?:,|\Z)@) {
-        # !! Merge string constants which end like each other. How do we spot the beginning?
-        $section = ".rodata";  # !! Any better?
-        print $outfh "section $section\n";
+        if ($rodata_strs) {
+          $section = "S";
+        } else {
+          $section = ".rodata";  # !! Any better? Move all after .rodata?
+          print $outfh "section $section\n";
+        }
       } elsif (m@\A[.]section [.]rodata\Z@) {
         $section = ".rodata";
         print $outfh "section $section\n";
@@ -215,7 +355,7 @@ sub as2nasm($$) {
         my $label = fix_label($1, \@bad_labels);
         print $outfh ";local $label\n";  # NASM doesn't need it.
       } elsif (m@\A[.]comm ([^\s:,]+), *(0|[1-9]\d*), *(0|[1-9]\d*)\Z@) {
-        if (!length($section)) {
+        if (length($section) <= 1) {
           ++$errc;
           print STDERR "error: .comm outside section ($.): $_\n";
         }
@@ -225,7 +365,7 @@ sub as2nasm($$) {
         print $outfh "$label: resb $size\n";  # !! Allow multiple definintions (but not for .local). There is also the `common' directive for `nasm -f elf'.
         print $outfh "section $section\n";
       } elsif (m@\A[.]align (0|[1-9]*)\Z@) {
-        if (!length($section)) {
+        if (length($section) <= 1) {
           ++$errc;
           print STDERR "error: .align outside section ($.): $_\n";
         }
@@ -234,7 +374,7 @@ sub as2nasm($$) {
       } elsif (m@\A[.](byte|value|long) (\S.*)\Z@) {  # !! 64-bit data? floating-point data?
         my $inst1 = $1;
         my $expr = fix_labels($2, \@bad_labels);
-        if (!length($section)) {
+        if (length($section) <= 1) {
           ++$errc;
           print STDERR "error: .$inst1 outside section ($.): $_\n";
         }
@@ -253,14 +393,17 @@ sub as2nasm($$) {
             defined($3) ? $as_string_escape1{$3} :
             $4 @ges;
         $data .= "\0" if defined($inst2);
-        # !! Merge strings ($data) by suffix.
         if (length($data)) {
           $data =~ s@([\x00-\x1f\\'\x7f-\xff])@ sprintf("', %d, '", ord($1)) @ges;
           $data = "'$data'";
           $data =~ s@, ''(?=, )@@g;  # Optimization.
           $data =~ s@\A'', @@;  # Optimization.
           $data =~ s@, ''\Z@@;  # Optimization.
-          print $outfh "db $data\n";
+          if (length($section) == 1) {
+            push @$rodata_strs, "db $data";
+          } else {
+            print $outfh "db $data\n";
+          }
         }
       } else {
         die "assert: missing directive: $_\n" if !m@\A([.][^ ]+)@;
@@ -272,7 +415,7 @@ sub as2nasm($$) {
         }
       }
     } elsif (s@\A([a-z][a-z0-9]*) *@@) {
-      if (!length($section)) {
+      if (length($section) <= 1) {
         ++$errc;
         print STDERR "error: instruction outside section ($.): $_\n";
       }
@@ -409,13 +552,25 @@ sub as2nasm($$) {
       print STDERR "error: bad label syntax ($.): $label\n";
     }
   }
+  if (0 and $rodata_strs and @$rodata_strs) {  # For debugging: don't merge (optimize) anything.
+    $section = ".rodata";
+    print $outfh "section $section\n";
+    for my $str (@$rodata_strs) {
+      $str .= "\n";
+      print $outfh $str;
+    }
+    @$rodata_strs = ();
+  }
   $errc
 }
 
 my $outfh = \*STDOUT;
 my $cpulevel = 7;  # !! Override, e.g. -march=i386.
+my $do_merge_strings = 1;
+my $rodata_strs = $do_merge_strings ? [] : undef;
 print_nasm_header($outfh, $cpulevel);
-my $errc = as2nasm(\*STDIN, $outfh);
+my $errc = as2nasm(\*STDIN, $outfh, $rodata_strs);
+print_merged_strings_in_strdata($outfh, $rodata_strs);
 print $outfh "extern F_callee\n";  # !! Autodetect.
 print $outfh "extern F_gf\n";  # !! Autodetect.
 die "fatal: $errc error@{[qq(s)x($errc!=1)]} during as2nasm translation\n" if $errc;

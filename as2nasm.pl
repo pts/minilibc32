@@ -8,6 +8,7 @@ BEGIN { $^W = 1 }
 use integer;
 use strict;
 
+# !! do we need to reorder global variables by alignment (or does GCC already emit in the correct, decreasing order -- not for .comm)?
 # !! doc: It's not the goal to get bitwise identical machine code output (but it's nice to have if easy), but to get same-size instructions wherever possible, maybe different encoding (e.g. `mov eax, ebx' has 2 encodings).
 # !! Treat nasm warnings as errors (everything on stderr).
 # !! Support `gcc -masm=intel' and `clang --x86-asm-syntax=intel'.

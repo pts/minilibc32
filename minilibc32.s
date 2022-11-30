@@ -13,6 +13,11 @@
 
 .text
 
+/* Labels starting with .L aren't saved by GNU as to the .o file. GCC
+ * generates labels with .L<num>, we generate .LA<num> to avoid conflicts
+ * in case this file is conatenated to an .s file emitted by `gcc -S'.
+ */
+
 .globl isalpha__RP3__
 .type  isalpha__RP3__, @function
 isalpha__RP3__:
@@ -28,10 +33,10 @@ isalpha__RP3__:
 isspace__RP3__:
 		sub $9, %al
 		cmp $5, %al
-		jb .1
+		jb .LA1
 		sub $0x17, %al
 		cmp $1, %al
-.1:		sbb %eax, %eax
+.LA1:		sbb %eax, %eax
 		neg %eax
 		ret
 
@@ -49,11 +54,11 @@ isdigit__RP3__:
 isxdigit__RP3__:
 		sub $0x30, %al
 		cmp $0x0a, %al
-		jb .2
+		jb .LA2
 		or $0x20, %al
 		sub $0x31, %al
 		cmp $6, %al
-.2:		sbb %eax, %eax
+.LA2:		sbb %eax, %eax
 		neg %eax
 		ret
 
@@ -64,10 +69,10 @@ strlen__RP3__:
 		xchg %esi, %eax
 		xor %eax, %eax
 		dec %eax
-.3:		cmpb $1, (%esi)
+.LA3:		cmpb $1, (%esi)
 		inc %esi
 		inc %eax
-		jae .3
+		jae .LA3
 		pop %esi
 		ret
 
@@ -78,10 +83,10 @@ strcpy__RP3__:
 		xchg %edx, %esi
 		xchg %edi, %eax
 		push %edi
-.4:		lodsb
+.LA4:		lodsb
 		stosb
 		cmp $0, %al
-		jne .4
+		jne .LA4
 		pop %eax
 		xchg %edx, %esi
 		pop %edi
@@ -94,16 +99,16 @@ strcmp__RP3__:
 		xchg %esi, %eax
 		xor %eax, %eax
 		xchg %edx, %edi
-.5:		lodsb
+.LA5:		lodsb
 		scasb
-		jne .6
+		jne .LA6
 		cmp $0, %al
-		jne .5
-		jmp .7
-.6:		mov $1, %al
-		jae .7
+		jne .LA5
+		jmp .LA7
+.LA6:		mov $1, %al
+		jae .LA7
 		neg %eax
-.7:		xchg %edx, %edi
+.LA7:		xchg %edx, %edi
 		pop %esi
 		ret
 
@@ -205,9 +210,9 @@ __do_syscall3:
 		push %ecx
 		int $0x80
 		test %eax, %eax
-		jns .8
+		jns .LA8
 		or $-1, %eax
-.8:		pop %ecx
+.LA8:		pop %ecx
 		pop %edx
 		pop %ebx
 		ret

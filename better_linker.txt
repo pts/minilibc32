@@ -1,0 +1,20 @@
+What are the benefits of a custom linker?
+
+* strips the ELF sections headers (like sstrip(1))
+* doesn't emit unnecessary ELF program headers (like PHDR emitted by
+  OpenWatcom)
+* merges C string literals by tail (GNU ld does it, OpenWatcom doesn't)
+* doesn't have the .data alignment to 0x1000 bug like GNU ld 2.30 and earlier
+* doesn't always emit non-executable stack program header, saving a few bytes
+* being an assembler-based linker, removes (or detects) the surprisingly large
+  alignment requirements of some global variables
+* being an assembler-based linker, optimizes jump delta sizes (a very small
+  benefit in general, GNU as can also do it)
+* can output shorter variants of the libc depending on which functions are
+  used
+* doesn't depend on unsuspecting system-specific behaviour of the Unix
+  system ld (e.g. the system ld may add ELF notes about the ABI version
+* emits program header offsets as compatible with UPX
+
+__END__
+

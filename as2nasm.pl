@@ -353,7 +353,7 @@ sub as2nasm($$$) {
       }
     }
     if (m@\A[.]@) {
-      if (m@\A[.](?:file "|size |type |loc |cfi_)@) {
+      if (m@\A[.](?:file "|size |type |loc |cfi_|ident ")@) {
         # Ignore this directive (.file, .size, .type).
       } elsif (m@\A([.](?:text|data|rodata))\Z@) {
         $section = $1;

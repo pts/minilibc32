@@ -25,7 +25,11 @@
 ; pushes the rest to the stack ([esp+4], [esp+8] etc.; [esp] is the return
 ; address). The caller removes arguments from the stack.
 ;
-; TODO(pts): Convert this NASM source to WASM and GNU as, and drop NASM as a dependency.
+; TODO(pts): Convert this NASM source to WASM and GNU as, and drop NASM as a
+;     dependency. This is not a good idea (to drop), because NASM can link a
+;     smaller executable program.
+; TODO(pts): Add `long long' multiplication and division functions, for GCC
+;     and OpenWatcom.
 ;
 
 		bits 32

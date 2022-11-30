@@ -389,8 +389,8 @@ sub as2nasm($$$) {
         }
         # GNU as 2.30 does the escaping like this.
         $data =~ s@\\(?:([0-3][0-7]{2})|[xX]([0-9a-fA-F]{1,})|([bfnrtv])|(.))@
-            defined($1) ? chr(oct($1)) :
-            defined($2) ? chr(hex(substr($2, -2))) :
+            defined($1) ? chr(oct($1) & 255) :
+            defined($2) ? chr(hex(substr($2, -2)) & 255) :
             defined($3) ? $as_string_escape1{$3} :
             $4 @ges;
         $data .= "\0" if defined($inst2);

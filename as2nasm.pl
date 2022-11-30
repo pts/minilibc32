@@ -3,11 +3,6 @@
 # as2nasm.pl: convert from GNU as (AT&T) syntax to NASM syntax
 # by pts@fazekas.hu at Tue Nov 29 01:46:33 CET 2022
 #
-
-BEGIN { $^W = 1 }
-use integer;
-use strict;
-
 # !! do we need to reorder global variables by alignment (or does GCC already emit in the correct, decreasing order -- not for .comm)?
 # !! doc: It's not the goal to get bitwise identical machine code output (but it's nice to have if easy), but to get same-size instructions wherever possible, maybe different encoding (e.g. `mov eax, ebx' has 2 encodings).
 # !! Treat nasm warnings as errors (everything on stderr).
@@ -16,6 +11,179 @@ use strict;
 #
 # ./as2nasm.pl <mininasm.gcc75.s >t.nasm; nasm -O19 -f elf -o t.o t.nasm && ld --fatal-warnings -s -m elf_i386 -o t.prog t.o && sstrip.static t.prog && ls -ld t.prog && ./t.prog
 # ./as2nasm.pl <mininasm.gcc75.s >t.nasm; nasm -O19 -f bin -o t.prog t.nasm && chmod +x t.prog && ls -ld t.prog && ./t.prog
+#
+
+BEGIN { $^W = 1 }
+use integer;
+use strict;
+
+# --- Merge C string literal by tail (e.g. merge "bar" and "foobar").
+
+# Merge C string literal by tail (e.g. merge "bar" and "foobar").
+#
+# $outfh is the filehandle to write NASM assembly lines to.
+#
+# $rodata_strs is a reference to an array containing assembly source lines
+# (`label:' and `db: ...') in `section .rodata.str1.1' (GCC, GNU as; already
+# converted to db) or `CONST SEGMENT' (OpenWatcom WASM). It will be cleared
+# as a side effect.
+sub print_merged_strings_in_strdata($$$) {
+  my($outfh, $rodata_strs, $is_db_canonical_gnu_as) = @_;
+  return if !$rodata_strs or !@$rodata_strs;
+  # Test data: my $strdata_test = "foo:\ndb 'ello', 0\ndb 0\ndb 'oth'\nmer:\ndb 'er', 1\ndb 2\ndb 0\ndb 3\ndb 0\ndb 4\ndb 'hell'\nbar:\ndb 'o', 0\nbaz:\ndb 'lo', 0, 'ello', 0, 'hell', 0, 'foo', ', ', 0, 15, 3, 0\nlast:";  @$rodata_strs = split(/\n/, $strdata_test);
+  my $ofs = 0;
+  my @labels;
+  my $strdata = "";
+  for my $str (@$rodata_strs) {
+    if ($str =~ m@\A\s*db\s@i) {
+      pos($str) = 0;
+      if ($is_db_canonical_gnu_as) {  # Shortcut.
+        while ($str =~ m@\d+|'([^']*)'@g) { $ofs += defined($1) ? length($1) : 1 }
+        $strdata .= $str;
+        $strdata .= "\n";
+      } else {
+        die if $str !~ s@\A\s*db\s+@@i;
+        my $str0 = $str;
+        my $has_error = 0;
+        # Parse and canonicalize the db string, so that we can transform it later.
+        $str =~ s@(-?)0[xX]([0-9a-fA-F]+)|(-?)([0-9][0-9a-fA-F]*)[hH]|(-?)(0(?!\d)|[1-9][0-9]*)|('[^']*')|(\s*,\s*)|([^\s',]+)@
+          my $v;
+          if (defined($1) or defined($3) or defined($5)) {
+            ++$ofs;
+            $v = defined($1) ? ($1 ? -hex($2) : hex($2)) & 255 :
+                 defined($3) ? ($3 ? -hex($4) : hex($4)) & 255 :
+                 defined($5) ? ($5 ? -int($6) : int($6)) & 255 : undef;
+            ($v >= 32 and $v <= 126 and $v != 0x27) ? "'" . chr($v) . "'" : $v
+          } elsif (defined($7)) { $ofs += length($6) - 2; $6 }
+          elsif (defined($8)) { ", " }
+          else { print STDERR "($9)"; $has_error = 1; "" }
+        @ge;
+        die "fatal: arg: syntax error in string literal db: $str0\n" if $has_error;
+        #$str =~ s@', '@@g;  # This is incorrect, e.g. db 1, ', ', 2
+        $strdata .= "db $str\n";
+      }
+    } elsif ($str =~ m@\s*([^\s:,]+)\s*:\s*\Z(?!\n)@) {
+      push @labels, [$ofs, $1];
+      #print STDERR ";;old: $1 equ strs+$ofs\n";
+    } elsif ($str =~ m@\S@) {
+      die "fatal: arg: unexpected string literal instruction: $str\n";
+    }
+  }
+  # $strdata already has very strict syntax (because we have generated its
+  # dbs), so we can do these regexp substitutions below safely.
+  $strdata =~ s@([^:])\ndb @$1, @g;
+  $strdata = "db " if !length($strdata);
+  die "fatal: assert: missing db" if $strdata !~ m@\Adb@;
+  die "fatal: assert: too many dbs" if $strdata =~ m@.db@s;
+  $strdata =~ s@^db @db , @mg;
+  $strdata =~ s@, 0(?=, )@, 0\ndb @g;  # Split lines on NUL.
+  my $ss = 0;
+  while (length($strdata) != $ss) {  # Join adjacent 'chars' arguments.
+    $ss = length($strdata);
+    $strdata =~ s@'([^']*)'(?:, '([^']*)')?@ my $x = defined($2) ? $2 : ""; "'$1$x'" @ge;
+  }
+  chomp($strdata);
+  @$rodata_strs = split(/\n/, $strdata);
+  my @sorteds;
+  {
+    my $i = 0;
+    for my $str (@$rodata_strs) {
+      my $rstr = reverse($str);
+      substr($rstr, -3) = "";  # Remove "db ".
+      substr($rstr, 0, 3) = "";  # Remove "0, ".
+      $rstr =~ s@' ,\Z@@;
+      push @sorteds, [$rstr, $i];
+      ++$i;
+    }
+  }
+  @sorteds = sort { $a->[0] cmp $b->[0] or $a->[1] <=> $b->[1] } @sorteds;
+  my %mapi;
+  for (my $i = 0; $i < $#sorteds; ++$i) {
+    my $rstri = $sorteds[$i][0];
+    my $rstri1 = $sorteds[$i + 1][0];
+    if (length($rstri1) >= length($rstri) and substr($rstri1, 0, length($rstri)) eq $rstri) {
+      $mapi{$sorteds[$i][1]} = $sorteds[$i + 1][1];
+    }
+  }
+  my @ofss;
+  my @oldofss;
+  #%mapi = ();  # For debugging: don't merge anything.
+  {
+    my $i = 0;
+    my $ofs = 0;
+    my $oldofs = 0;
+    my @sizes;
+    for my $str (@$rodata_strs) {
+      pos($str) = 0;
+      my $size = 0;
+      while ($str =~ m@\d+|'([^']*)'@g) { $size += defined($1) ? length($1) : 1 }
+      push @sizes, $size;
+      push @oldofss, $oldofs;
+      $oldofs += $size;
+      if (exists($mapi{$i})) {
+        my $j = $mapi{$i};
+        $j = $mapi{$j} while exists($mapi{$j});
+        $mapi{$i} = $j;
+        #print STDERR ";$i: ($str) -> ($rodata_strs->[$j]}\n";
+        push @ofss, undef;
+      } else {
+        push @ofss, $ofs;
+        $ofs += $size;
+        #print STDERR "$str\n";
+      }
+      ++$i;
+    }
+    if (%mapi) {
+      for ($i = 0; $i < @$rodata_strs; ++$i) {
+        my $j = $mapi{$i};
+        $ofss[$i] = $ofss[$j] + $sizes[$j] - $sizes[$i] if defined($j) and !defined($ofss[$i]);
+      }
+    }
+    push @ofss, $ofs;
+    push @oldofss, $oldofs;
+  }
+  {
+    for my $str (@$rodata_strs) {
+      die "fatal: assert: missing db-comma\n" if $str !~ s@\Adb , @db @;  # Modify in place.
+      # !! if TODO(pts): length($str) > 500, then split to several `db's.
+      $str .= "\n";
+    }
+    #print $outfh "section .rodata\n";  # Printed by the caller.
+    print $outfh "__strs:\n";
+    my $i = 0;
+    my $pi = 0;
+    for my $pair (@labels) {
+      my($lofs, $label) = @$pair;
+      ++$i while $i + 1 < @oldofss and $oldofss[$i + 1] <= $lofs;
+      die "fatal: assert: bad oldoffs\n" if $i >= @oldofss;
+      my $ofs = $lofs - $oldofss[$i] + $ofss[$i];
+      for (; $pi < $i; ++$pi) {
+        #print STDERR "$rodata_strs->[$pi]\n" if !exists($mapi{$pi});
+        print $outfh $rodata_strs->[$pi] if !exists($mapi{$pi});
+      }
+      if ($lofs != $oldofss[$i] or exists($mapi{$i})) {
+        if (exists($mapi{$i})) {
+          # !! TODO(pts): Find a later, closer label, report relative offset there.
+          #print STDERR "$label equ __strs+$ofs  ; old=$lofs\n";
+          print $outfh "$label equ __strs+$ofs  ; old=$lofs\n";
+        } else {
+          my $dofs = $lofs - $oldofss[$i];
+          #print $outfh "$label equ \$+$dofs\n";
+          print STDERR "$label equ \$+$dofs\n";
+        }
+      } else {
+        #print STDERR "$label:\n";
+        print $outfh "$label:\n";
+      }
+    }
+    for (; $pi < @$rodata_strs; ++$pi) {
+      #print STDERR "$rodata_strs->[$pi]\n" if !exists($mapi{$pi});
+      print $outfh $rodata_strs->[$pi] if !exists($mapi{$pi});
+    }
+  }
+  @$rodata_strs = ();
+}
+
 
 # !! Was fuzz2.pl complete? Why not jb, jl, cmpxchg8b, fcmovl, prefetchw?
 my %force_nosize_insts = map { $_ => 1 } qw(
@@ -136,141 +304,6 @@ sub fix_reg($) {
   return "st0" if $reg eq "st";
   $reg =~ s@\Ast\((\d+)\)\Z(?!\n)@st$1@;
   $reg
-}
-
-sub print_merged_strings_in_strdata($$) {
-  my($outfh, $rodata_strs) = @_;
-  return if !$rodata_strs or !@$rodata_strs;
-  my $strdata = join("\n", @$rodata_strs);
-  # Test data: $strdata = "foo:\ndb 'ello', 0\ndb 0\ndb 'oth'\nmer:\ndb 'er', 1\ndb 2\ndb 0\ndb 3\ndb 0\ndb 4\ndb 'hell'\nbar:\ndb 'o', 0\nbaz:\ndb 'lo', 0, 'ello', 0, 'hell', 0, 'foo', ', ', 0, 15, 3, 0\nlast:";  @$rodata_strs = split(/\n/, $strdata);
-  my $ofs = 0;
-  my @labels;
-  for my $str (@$rodata_strs) {
-    if ($str =~ m@db @) {
-      pos($str) = 0;
-      while ($str =~ m@\d+|'([^']*)'@g) { $ofs += defined($1) ? length($1) : 1 }
-    } elsif ($str =~ m@([^\s:,]+):\Z@) {
-      push @labels, [$ofs, $1];
-      #print STDERR ";;old: $1 equ strs+$ofs\n";
-    } else {
-      die "fatal: assert: unexpected strs line: $str\n";
-    }
-  }
-  $strdata = join("\n", grep { !m@:\Z@ } @$rodata_strs);
-  $strdata .= "\n";
-  # $strdata already has very strict syntax (because we have generated its
-  # dbs), so we can do these regexp substitutions below safely.
-  $strdata =~ s@([^:])\ndb @$1, @g;
-  $strdata = "db " if !length($strdata);
-  die "fatal: assert: missing db" if $strdata !~ m@\Adb@;
-  die "fatal: assert: too many dbs" if $strdata =~ m@.db@s;
-  $strdata =~ s@^db @db , @mg;
-  $strdata =~ s@, 0(?=, )@, 0\ndb @g;  # Split lines on NUL.
-  my $ss = 0;
-  while (length($strdata) != $ss) {
-    $ss = length($strdata);
-    $strdata =~ s@'([^']*)'(?:, '([^']*)')?@ my $x = defined($2) ? $2 : ""; "'$1$x'" @ge;
-  }
-  chomp($strdata);
-  @$rodata_strs = split(/\n/, $strdata);
-  my @sorteds;
-  {
-    my $i = 0;
-    for my $str (@$rodata_strs) {
-      my $rstr = reverse($str);
-      substr($rstr, -3) = "";  # Remove "db ".
-      substr($rstr, 0, 3) = "";  # Remove "0, ".
-      $rstr =~ s@' ,\Z@@;
-      push @sorteds, [$rstr, $i];
-      ++$i;
-    }
-  }
-  @sorteds = sort { $a->[0] cmp $b->[0] or $a->[1] <=> $b->[1] } @sorteds;
-  my %mapi;
-  for (my $i = 0; $i < $#sorteds; ++$i) {
-    my $rstri = $sorteds[$i][0];
-    my $rstri1 = $sorteds[$i + 1][0];
-    if (length($rstri1) >= length($rstri) and substr($rstri1, 0, length($rstri)) eq $rstri) {
-      $mapi{$sorteds[$i][1]} = $sorteds[$i + 1][1];
-    }
-  }
-  my @ofss;
-  my @oldofss;
-  #%mapi = ();  # For debugging: don't merge anything.
-  {
-    my $i = 0;
-    my $ofs = 0;
-    my $oldofs = 0;
-    my @sizes;
-    for my $str (@$rodata_strs) {
-      pos($str) = 0;
-      my $size = 0;
-      while ($str =~ m@\d+|'([^']*)'@g) { $size += defined($1) ? length($1) : 1 }
-      push @sizes, $size;
-      push @oldofss, $oldofs;
-      $oldofs += $size;
-      if (exists($mapi{$i})) {
-        my $j = $mapi{$i};
-        $j = $mapi{$j} while exists($mapi{$j});
-        $mapi{$i} = $j;
-        #print STDERR ";$i: ($str) -> ($rodata_strs->[$j]}\n";
-        push @ofss, undef;
-      } else {
-        push @ofss, $ofs;
-        $ofs += $size;
-        #print STDERR "$str\n";
-      }
-      ++$i;
-    }
-    if (%mapi) {
-      for ($i = 0; $i < @$rodata_strs; ++$i) {
-        my $j = $mapi{$i};
-        $ofss[$i] = $ofss[$j] + $sizes[$j] - $sizes[$i] if defined($j) and !defined($ofss[$i]);
-      }
-    }
-    push @ofss, $ofs;
-    push @oldofss, $oldofs;
-  }
-  {
-    for my $str (@$rodata_strs) {
-      die "fatal: assert: missing db-comma\n" if $str !~ s@\Adb , @db @;  # Modify in place.
-      # !! if TODO(pts): length($str) > 500, then split to several `db's.
-      $str .= "\n";
-    }
-    print $outfh "section .rodata\n";
-    print $outfh "strs:\n";
-    my $i = 0;
-    my $pi = 0;
-    for my $pair (@labels) {
-      my($lofs, $label) = @$pair;
-      ++$i while $i + 1 < @oldofss and $oldofss[$i + 1] <= $lofs;
-      die "fatal: assert: bad oldoffs\n" if $i >= @oldofss;
-      my $ofs = $lofs - $oldofss[$i] + $ofss[$i];
-      for (; $pi < $i; ++$pi) {
-        #print STDERR "$rodata_strs->[$pi]\n" if !exists($mapi{$pi});
-        print $outfh $rodata_strs->[$pi] if !exists($mapi{$pi});
-      }
-      if ($lofs != $oldofss[$i] or exists($mapi{$i})) {
-        if (exists($mapi{$i})) {
-          # !! TODO(pts): Find a later, closer label, report relative offset there.
-          #print STDERR "$label equ strs+$ofs  ; old=$lofs\n";
-          print $outfh "$label equ strs+$ofs  ; old=$lofs\n";
-        } else {
-          my $dofs = $lofs - $oldofss[$i];
-          #print $outfh "$label equ \$+$dofs\n";
-          print STDERR "$label equ \$+$dofs\n";
-        }
-      } else {
-        #print STDERR "$label:\n";
-        print $outfh "$label:\n";
-      }
-    }
-    for (; $pi < @$rodata_strs; ++$pi) {
-      #print STDERR "$rodata_strs->[$pi]\n" if !exists($mapi{$pi});
-      print $outfh $rodata_strs->[$pi] if !exists($mapi{$pi});
-    }
-  }
-  @$rodata_strs = ();
 }
 
 # Converts GNU as syntax to NASM 0.98.39 syntax, Supports only a small
@@ -571,7 +604,8 @@ my $do_merge_strings = 1;
 my $rodata_strs = $do_merge_strings ? [] : undef;
 print_nasm_header($outfh, $cpulevel);
 my $errc = as2nasm(\*STDIN, $outfh, $rodata_strs);
-print_merged_strings_in_strdata($outfh, $rodata_strs);
+print "section .rodata\n" if $rodata_strs and @$rodata_strs;
+print_merged_strings_in_strdata($outfh, $rodata_strs, 1);
 print $outfh "extern F_callee\n";  # !! Autodetect.
 print $outfh "extern F_gf\n";  # !! Autodetect.
 die "fatal: $errc error@{[qq(s)x($errc!=1)]} during as2nasm translation\n" if $errc;

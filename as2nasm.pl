@@ -958,6 +958,26 @@ die "fatal: open NASM-assembly output file: $outfn: $!\n" if !open($outfh, ">", 
 binmode($outfh);
 
 my $srcfmt = detect_source_format($srcfh);
+if (defined($srcfmt) and $srcfmt eq "omf") {  # Run `wdis' to get (dis)assembly of the WASM syntax.
+  close($srcfh);
+  my $wasmfn = "$srcfn.tmp.wdis";  # TODO(pts): Remove temporary files upon exit.
+  my $srccmdfn = $srcfn;
+  substr($srccmdfn, 0, 0) = "./" if $srccmdfn =~ m@-@;  # TODO(pts): Win32 compatibility.
+  my @wdis_cmd = ("wdis", "-a", $srccmdfn);
+  print STDERR "info: running wdis_cmd: @wdis_cmd >$wasmfn\n";
+  {
+    my $saveout;
+    die if !open($saveout, ">&", \*STDOUT);
+    die "fatal: open: $wasmfn\n: $!" if !open(STDOUT, ">", $wasmfn);
+    die "fatal: wdis_cmd failed: @wdis_cmd\n" if system(@wdis_cmd);
+    die if !open(STDOUT, ">&", $saveout);
+    close($saveout);
+  }
+  $srcfn = $wasmfn;
+  die "fatal: open assembly source file: $srcfn: $!\n" if !open($srcfh, "<", $srcfn);
+  binmode($srcfh);
+  $srcfmt = detect_source_format($srcfh);
+}
 die "fatal: source file format not recognized: $srcfn\n" if !defined($srcfmt);
 die "fatal: assembly source file already in NASM format: $srcfn\n" if $srcfmt eq "nasm";
 die "fatal: file format $srcfmt is not assembly source: $srcfn\n" if $srcfmt ne "as" and $srcfmt ne "wasm";

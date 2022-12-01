@@ -45,6 +45,10 @@ extern int __LIBC_CALL main(int argc, char **argv);
 #define O_RDONLY 0  /* flags bitfield value below. */
 #define O_WRONLY 1
 #define O_RDWR   2
+/* Linux-specific. */
+#define O_CREAT 0100
+#define O_TRUNC 01000
+/* TODO(pts): We are not specifying O_APPEND, because WDOSX and MWPESTUB don't support it. `#define O_APPEND 02000' */
 
 #define STDIN_FILENO  0
 #define STDOUT_FILENO 1

@@ -777,15 +777,23 @@ sub wasm2nasm($$$$$) {
   my $bss_org = 0;
   my $is_end = 0;
   my %segment_to_section = qw(_TEXT .text  CONST .rodata  CONST2 .rodata  _DATA .data  _BSS .bss);
+  my %directive_to_segment = qw(.code _TEXT  .const CONST2  .data _DATA  .data? _BSS);  # TODO(pts): Is there a way for CONST2?
+  my $end_expr;
   while (defined($first_line) or defined($first_line = <$srcfh>)) {
     ++$lc;
     ($_, $first_line) = ($first_line, undef);
     y@\r\n@@d;
     die "fatal: line after end ($lc): $_\n" if $is_end;
     my $is_instr = s@^\t(?!\t)@@;  # Assembly instruction.
-    s@;.*@@;
-    s@^\s+@@;
-    s@\s+@ @g;
+    s@\A\s+@@;
+    if (s@^\s*db\s+@db @i) {
+      die "fatal: comment in db line\n" if m@;@;  # TODO(pts): Parse db '?'.
+      s@\s+\Z(?!\n)@@;
+    } else {
+      s@;.*@@s;
+      s@\s+@ @g;
+      s@ \Z(?!\n)@@;
+    }
     if ($is_instr) {
       die "$0: unsupported instruction in non-.text ($lc): $_\n" if $section ne ".text";
       die "$0: unsupported quote in instruction ($lc): $_\n" if m@'@;  # Whitespace is already gone.
@@ -797,7 +805,7 @@ sub wasm2nasm($$$$$) {
             " $1 " . (defined($2) ? "[$3$dspl]" : "[\$$4]") @ge;
         s@([\s,])([^\[\],\s]+)\[(.*?)\]@${1}[$3+$2]@g;  # `cmp al, 42[esi]'   -->  `cmp al, [esi+42]'.
         s@([-+])FLAT:([^,]+)@$1\$$2@g;
-        s@ offset FLAT:([^,]+)@ \$$1@g;
+        s@\boffset (?:FLAT:)?([^,+\-\[\]*/()<>\s]+)@ \$$1@g;
       }
       if ($rodata_strs and $segment eq "CONST") {  # C string literals.
         push @$rodata_strs, $_;
@@ -808,6 +816,10 @@ sub wasm2nasm($$$$$) {
       if ($_ eq ".387" or $_ eq ".model flat") {  # Ignore.
       } elsif (m@^[.]386@) {
         print $outfh "cpu 386\n";
+      } elsif (exists($directive_to_segment{$_})) {
+        $segment = $directive_to_segment{$_};
+        $section = $segment_to_section{$segment};
+        print $outfh "\nsection $section  ; $segment\n";
       } else {
         die "fatal: unsupported WASM directive: $_\n" ;
       }
@@ -818,10 +830,9 @@ sub wasm2nasm($$$$$) {
         print $outfh "_start:\n" if $_ eq "_start_:";  # Add extra start label for entry point.
         print $outfh "\$$_\n";
       }
-    } elsif (s@^(D[BWD])(?= )@@i) {
+    } elsif (s@^(d[bwd])(?= )@@i) {
       my $cmd = lc($1);
-      die "$0: unsupported quote in data $cmd ($lc): $_\n" if m@'@;  # Whitespace is already gone.
-      s@\boffset FLAT:@\$@g if !m@'@;
+      s@\boffset (?:FLAT:)?@\$@g if !m@'@;
       if ($rodata_strs and $segment eq "CONST") {  # C string literals.
         push @$rodata_strs, $cmd . $_;
       } else {
@@ -845,12 +856,18 @@ sub wasm2nasm($$$$$) {
       $bss_org += $delta_bss_org;
     } elsif (m@^([^\s:\[\],+\-*/]+) LABEL BYTE$@ and $section eq ".bss") {
       print $outfh "\$$1:\n";
-    } elsif ($_ eq "END") {
+    } elsif (m@^end(?: ([^\s:\[\],+\-*/]+))?$@i) {
+      $end_expr = $1;
       $is_end = 1;
-    } elsif (!length($_) or m@^PUBLIC @ or m@^DGROUP GROUP@ or m@^ASSUME @) {  # Ignore.
+    } elsif (m@^public ([^\s:\[\],+\-*/]+)?$@i) {
+      print $outfh "global \$$1\n";
+    } elsif (!length($_) or m@^DGROUP GROUP@ or m@^ASSUME @) {  # Ignore.
     } else {
       die "fatal: unsupported WASM instruction ($lc): $_\n" ;
     }
+  }
+  if (defined $end_expr) {
+    print $outfh "\$_start equ $end_expr\n" if $end_expr ne "_start";
   }
 }
 

@@ -4,7 +4,7 @@ eval 'PERL_BADLANG=x;export PERL_BADLANG;exec perl -x "$0" "$@";exit 1'
 +0 if 0;eval("\n\n\n\n".<<'__END__');die$@if$@;__END__
 
 #
-# as2nasm.pl: convert from i386 GNU as (AT&T) or WASM syntax to NASM syntax
+# as2nasm.pl: convert from i386 GNU as (AT&T) or WASM syntax, link with NASM
 # by pts@fazekas.hu at Tue Nov 29 01:46:33 CET 2022
 #
 # !! do we need to reorder global variables by alignment (or does GCC already emit in the correct, decreasing order -- not for .comm)?
@@ -893,12 +893,18 @@ sub detect_source_format($) {
   undef
 }
 
+sub argv_escape_fn($) {
+  my $filename = $_[0];
+  substr($filename, 0, 0) = "./" if $filename =~ m@-@;  # TODO(pts): Win32 compatibility.
+  $filename
+}
+
 # --- main().
 
 if (!@ARGV or $ARGV[0] eq "--help") {
-  print STDERR "as2nasm.pl: convert from i386 GNU as (AT&T) or WASM syntax to NASM syntax\n",
+  print STDERR "as2nasm.pl: convert from i386 GNU as (AT&T) or WASM syntax, link with NASM\n",
                "This is free software, GNU GPL >=2.0. There is NO WARRANTY. Use at your risk.\n",
-               "Usage: $0 [<flags>...] -o <output.nasm> <input.s>\n",
+               "Usage: $0 [<flags>...] -o <output.prog> <input.s>\n",
                "Typical use case: compile C with GCC or OpenWatcom to assembly, then convert.\n",
                "Input syntax support is mostly limited to `gcc -S' and `wdis -a' output.\n";
   exit(!@ARGV);
@@ -909,6 +915,8 @@ my $cpulevel = 7;
 my $outfn;
 my $do_merge_tail_strings = 1;
 my $data_alignment = 4;
+my $outfmt = "elfprog";
+my $nasm_prog = "nasm";
 # TODO(pts): Add flag to inline elf.inc.nasm.
 while ($i < @ARGV) {
   my $arg = $ARGV[$i++];
@@ -941,6 +949,17 @@ while ($i < @ARGV) {
         ($value = int($value)) > 32 or
         ($value & ($value - 1));
     $data_alignment = $value > 1 ? $value : 1;
+  } elsif ($arg eq "-S") {
+    $outfmt = "nasm";
+  } elsif ($arg eq "-c") {
+    $outfmt = "elfobj";
+  } elsif ($arg =~ m@--outfmt=(.*)\Z(?!\n)@) {
+    $outfmt = lc($1);
+    die "fatal: bad output format: $outfmt" if !
+        ($outfmt eq "nasm" or $outfmt eq "elfobj" or $outfmt eq "elfprog");
+  } elsif ($arg =~ m@--nasm=(.*)\Z(?!\n)@) {
+    die "fatal: bad nasm program; $nasm_prog\n" if !length($nasm_prog);
+    $nasm_prog = $1;
   } else {
     die "fatal: unknown flag: $arg\n";
   }
@@ -950,22 +969,25 @@ die "fatal: too many source files, only one allowed\n" if $i > @ARGV + 1;
 my $srcfn = $ARGV[$i];
 die "fatal: missing NASM-assembly output file\n" if !defined($outfn);
 
+my @unlink_fns;
 my $srcfh;
 die "fatal: open assembly source file: $srcfn: $!\n" if !open($srcfh, "<", $srcfn);
 binmode($srcfh);
-my $outfh;
-die "fatal: open NASM-assembly output file: $outfn: $!\n" if !open($outfh, ">", $outfn);
-binmode($outfh);
-my @unlink_fns;
+my $nasmfn = $outfn;
+if ($outfmt ne "nasm") {
+  $nasmfn = "$outfn.tmp.nasm";
+  push @unlink_fns, $nasmfn;
+}
+my $nasmfh;
+die "fatal: open NASM-assembly output file: $nasmfn: $!\n" if !open($nasmfh, ">", $nasmfn);
+binmode($nasmfh);
 
 my $srcfmt = detect_source_format($srcfh);
 if (defined($srcfmt) and $srcfmt eq "omf") {  # Run `wdis' to get (dis)assembly of the WASM syntax.
   close($srcfh);
-  my $wasmfn = "$srcfn.tmp.wdis";  # TODO(pts): Remove temporary files upon exit.
+  my $wasmfn = "$outfn.tmp.wdis";  # TODO(pts): Remove temporary files upon exit.
   push @unlink_fns, $wasmfn;
-  my $srccmdfn = $srcfn;
-  substr($srccmdfn, 0, 0) = "./" if $srccmdfn =~ m@-@;  # TODO(pts): Win32 compatibility.
-  my @wdis_cmd = ("wdis", "-a", $srccmdfn);
+  my @wdis_cmd = ("wdis", "-a", argv_escape_fn($srcfn));
   print STDERR "info: running wdis_cmd: @wdis_cmd >$wasmfn\n";
   {
     my $saveout;
@@ -988,29 +1010,47 @@ my $errc = 0;
 my $rodata_strs = $do_merge_tail_strings ? [] : undef;
 my $define_when_defined = {};  # This won't work for multiple source files.
 my $common_by_label = {};
-print_nasm_header($outfh, $cpulevel, $data_alignment);
+print_nasm_header($nasmfh, $cpulevel, $data_alignment);
 if ($srcfmt eq "as") {
+  print STDERR "info: converting from GNU as to NASM syntax: $srcfn to $nasmfn\n";
   my $undefineds = {};
-  $errc += as2nasm($srcfh, $outfh, $rodata_strs, $undefineds, $define_when_defined, $common_by_label);
-  print $outfh "\nsection .rodata\n" if $rodata_strs and @$rodata_strs;
-  print_merged_strings_in_strdata($outfh, $rodata_strs, 1);
+  $errc += as2nasm($srcfh, $nasmfh, $rodata_strs, $undefineds, $define_when_defined, $common_by_label);
+  print $nasmfh "\nsection .rodata\n" if $rodata_strs and @$rodata_strs;
+  print_merged_strings_in_strdata($nasmfh, $rodata_strs, 1);
   if (%$undefineds) {
-    print $outfh "\n";
+    print $nasmfh "\n";
     for my $label (sort(keys(%$undefineds))) {
-      print $outfh "extern $label\n";
+      print $nasmfh "extern $label\n";
     }
   }
 } elsif ($srcfmt eq "wasm") {
-  wasm2nasm($srcfh, $outfh, $rodata_strs);
-  print $outfh "\nsection .rodata\n" if $rodata_strs and @$rodata_strs;
-  print_merged_strings_in_strdata($outfh, $rodata_strs, 0);
+  print STDERR "info: converting from WASM to NASM syntax: $srcfn to $nasmfn\n";
+  wasm2nasm($srcfh, $nasmfh, $rodata_strs);
+  print $nasmfh "\nsection .rodata\n" if $rodata_strs and @$rodata_strs;
+  print_merged_strings_in_strdata($nasmfh, $rodata_strs, 0);
 }
-print_commons($outfh, $common_by_label, $define_when_defined);  # !! Do it in the caller, after aggregating from multiple source files.
+print_commons($nasmfh, $common_by_label, $define_when_defined);  # !! Do it in the caller, after aggregating from multiple source files.
 die "fatal: $errc error@{[qq(s)x($errc!=1)]} during as2nasm translation\n" if $errc;
-print $outfh "\n_end\n";  # elf.inc.nasm
-print $outfh "\n; __END__\n";
-die "fatal: error writing NASM-assembly output\n" if !close($outfh);
+print $nasmfh "\n_end\n";  # elf.inc.nasm
+print $nasmfh "\n; __END__\n";
+die "fatal: error writing NASM-assembly output\n" if !close($nasmfh);
 close($srcfh);
+
+if ($outfmt eq "elfprog" or $outfmt eq "elfobj") {
+  unlink($outfn);
+  my $nasmfmt = ($outfmt eq "elfprog" ? "bin" : "elf");  # With `-f bin', elf.inc.nasm will do the linking. !!
+  my @nasm_link_cmd = ($nasm_prog, "-O999999999", "-w+orphan-labels", "-f", $nasmfmt, "-o", argv_escape_fn($outfn), argv_escape_fn($nasmfn));
+  print STDERR "info: running nasm_link_cmd: @nasm_link_cmd\n";
+  die "fatal: nasm_link_cmd failed: @nasm_link_cmd\n" if system(@nasm_link_cmd);
+  if ($outfmt eq "elfprog") {  # Make it executable.
+    # TODO(pts): Ignore this on Win32 (?).
+    my @st = stat($outfn);
+    if (@st) {
+      my $new_mode = ((($st[2] & 0777) | 0111) & ~umask());
+      die "fatal: chmod $outfn: $!\n" if !chmod($new_mode, $outfn);
+    }
+  }
+}
 
 # TODO(pts): Do it even on failure.
 for my $filename (@unlink_fns) { unlink($filename); }

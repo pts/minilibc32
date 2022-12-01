@@ -14,7 +14,7 @@ objdump -d x86_32a >x86_32a.d
 perl -pi -e 's@^x86_32\w*(:[ \t]+file format )@$1@' x86_32a.d  # For shorter diffs.
 diff -U3 x86_32.d x86_32a.d
 
-./as2nasm.pl <x86_32.s >x86_32c.nasm; nasm-0.98.39 -w+orphan-labels -O9 -f elf -o x86_32c.o x86_32c.nasm && ld --fatal-warnings -s -m elf_i386 -o x86_32c x86_32c.o && ./x86_32c || exit 1  # && echo OK &&
+./as2nasm.pl -S -o x86_32c.nasm x86_32.s && nasm-0.98.39 -w+orphan-labels -O9 -f elf -o x86_32c.o x86_32c.nasm && ld --fatal-warnings -s -m elf_i386 -o x86_32c x86_32c.o && ./x86_32c || exit 1  # && echo OK &&
 objdump -d x86_32c >x86_32c.d
 perl -pi -e 's@^x86_32\w*(:[ \t]+file format )@$1@' x86_32c.d  # For shorter diffs.
 diff -U3 x86_32.d x86_32c.d

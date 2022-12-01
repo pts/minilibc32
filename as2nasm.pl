@@ -375,7 +375,7 @@ sub as2nasm($$$$$$$$) {
       $is_comment = 0;
     }
     y@[\r\n]@@;
-    s@/[*].*?[*]/@ @sg;
+    s@/[*].*?[*]/@ @sg;  # !!! TODO(pts): Parse .string "/*"
     $is_comment = 1 if s@/[*].*@@s;  # Start of multiline comment.
     s@\A[\s;]+@@;
     s@[\s;]+\Z(?!\n)@@;
@@ -602,7 +602,7 @@ sub as2nasm($$$$$$$$) {
           $unknown_directives{$d} = 1;
         }
       }
-    } elsif (s@\A([a-z][a-z0-9]*) +@@) {
+    } elsif (s@\A([a-z][a-z0-9]*)(?: +|\Z)@@) {
       if (length($section) <= 1) {
         ++$errc;
         print STDERR "error: instruction outside section ($lc): $_\n";
@@ -890,7 +890,7 @@ sub detect_source_format($$$) {
       return "wasm";
     } elsif (m@\A\s*(?:bits\s|cpu\s|section\s|%)@i) {
       return "nasm";
-    #} elsif (m@\s*;@) {
+    } elsif (m@\s*;@) {
     #  $can_be_as = 0;
     } else {
       chomp;

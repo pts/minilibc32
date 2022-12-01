@@ -58,7 +58,7 @@ sub print_merged_strings_in_strdata($$$) {
                  defined($3) ? ($3 ? -hex($4) : hex($4)) & 255 :
                  defined($5) ? ($5 ? -int($6) : int($6)) & 255 : undef;
             ($v >= 32 and $v <= 126 and $v != 0x27) ? "'" . chr($v) . "'" : $v
-          } elsif (defined($7)) { $ofs += length($6) - 2; $6 }
+          } elsif (defined($7)) { $ofs += length($7) - 2; $7 }
           elsif (defined($8)) { ", " }
           else { print STDERR "($9)"; $has_error = 1; "" }
         @ge;

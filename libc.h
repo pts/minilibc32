@@ -94,7 +94,9 @@ extern __LIBC_NORETURN void __LIBC_FUNC(exit, (int status));
 /* --- <fcntl.h> and <unistd.h> */
 extern void* __LIBC_FUNC(sys_brk, (void *addr));
 /**/
+/* Check return value with `== -1' rather than `< 0' for Win32 portability. */
 extern int __LIBC_FUNC(creat, (const char *pathname, mode_t mode));
+/* Check return value with `== -1' rather than `< 0' for Win32 portability. */
 extern int __LIBC_FUNC(open, (const char *pathname, int flags, mode_t mode));
 extern int __LIBC_FUNC(close, (int fd));
 /**/

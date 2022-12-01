@@ -260,7 +260,7 @@ sub print_nasm_header($$$$) {
   %define _ELF_PROG_CPU_UNCHANGED
   _elf_start 32, Linux, $data_alignment|sect_many|shentsize
 %endif
-);
+\n);
   # After elf.inc.nasm, because it may modify the CPU level.
   my $cpulevel_str = ($cpulevel > 6 ? "" : $cpulevel >= 3 ? "${cpulevel}86" : "386");  # "prescott" would also work for $cpulevel > 6;
   print $outfh "cpu $cpulevel_str\n" if length($cpulevel_str);
@@ -1013,8 +1013,7 @@ if (defined($srcfmt) and $srcfmt eq "omf") {  # Run `wdis' to get (dis)assembly 
   $srcfmt = detect_source_format($srcfh, \$first_line, \$lc);
 }
 die "fatal: source file format not recognized: $srcfn\n" if !defined($srcfmt);
-die "fatal: assembly source file already in NASM format: $srcfn\n" if $srcfmt eq "nasm";
-die "fatal: file format $srcfmt is not assembly source: $srcfn\n" if $srcfmt ne "as" and $srcfmt ne "wasm";
+die "fatal: file format $srcfmt is not assembly source: $srcfn\n" if $srcfmt ne "as" and $srcfmt ne "wasm" and $srcfmt ne "nasm";
 
 my $errc = 0;
 my $rodata_strs = $do_merge_tail_strings ? [] : undef;
@@ -1041,6 +1040,9 @@ if ($srcfmt eq "as") {
   wasm2nasm($srcfh, $nasmfh, $first_line, $lc, $rodata_strs);
   print $nasmfh "\nsection .rodata\n" if $rodata_strs and @$rodata_strs;
   print_merged_strings_in_strdata($nasmfh, $rodata_strs, 0);
+} elsif ($srcfmt eq "nasm") {  # Just copy the lines.
+  print $nasmfh $first_line if defined($first_line);
+  while (<$srcfh>) { print $nasmfh $_ }
 }
 print_commons($nasmfh, $common_by_label, $define_when_defined);  # !! Do it in the caller, after aggregating from multiple source files.
 die "fatal: $errc error@{[qq(s)x($errc!=1)]} during as2nasm translation\n" if $errc;

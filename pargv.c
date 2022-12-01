@@ -3,8 +3,9 @@
  * by pts@fazekas.hu at Thu Dec  1 15:57:22 CET 2022
  *
  * Compile: gcc -s -O2 -W -Wall -ansi -pedantic -o pargv pargv.c
- * Compile: gcc -D__MINILIBC32__ -Wl,-z,norelro -Wl,--build-id=none -s -static -m32 -mregparm=3 -fno-pic -fno-stack-protector -fomit-frame-pointer -fno-ident -ffreestanding -fno-builtin -fno-unwind-tables -fno-asynchronous-unwind-tables -nostdlib -nostdinc -Os -falign-functions=1 -mpreferred-stack-boundary=2 -falign-jumps=1 -falign-loops=1 -march=i386 -ansi -pedantic -W -Wall -Werror=implicit-function-declaration -o pargv pargv.c minilibc32.o && sstrip pargv
- * Compile: owcc -bwin32 -Wl,runtime -Wl,console=3.10 -Os -s -fno-stack-check -march=i386 -W -Wall -Wextra -o pargv.exe pargv.c
+ * Compile for Linux i386: gcc -D__MINILIBC32__ -Wl,-z,norelro -Wl,--build-id=none -s -static -m32 -mregparm=3 -fno-pic -fno-stack-protector -fomit-frame-pointer -fno-ident -ffreestanding -fno-builtin -fno-unwind-tables -fno-asynchronous-unwind-tables -nostdlib -nostdinc -Os -falign-functions=1 -mpreferred-stack-boundary=2 -falign-jumps=1 -falign-loops=1 -march=i386 -ansi -pedantic -W -Wall -Werror=implicit-function-declaration -o pargv pargv.c minilibc32.o && sstrip pargv
+ * Compile for Win32: owcc -bwin32 -Wl,runtime -Wl,console=3.10 -Os -s -fno-stack-check -march=i386 -W -Wall -Wextra -o pargv.exe pargv.c
+ * Compile for Win32: i686-w64-mingw32-gcc -m32 -mconsole -s -Os -W -Wall -Wextra -o pargvm.exe pargv.c
  */
 
 #if defined(__WATCOMC__) && defined(_WIN32) && defined(_M_I386)
@@ -56,6 +57,7 @@
 #  ifdef __MINILIBC32__
 #    include "libc.h"
 #  else
+#    include <fcntl.h>  /* O_BINARY. */
 #    include <unistd.h>
 #  endif
    static const int STDOUTFD = 1;
@@ -70,6 +72,9 @@ static int my_strlen(const char *s) {
 int main(int argc, char **argv) {
   const int fd = STDOUTFD;
   (void)argc;
+#if defined(O_BINARY) && O_BINARY  /* Win32, msvcrt.dll (usually MinGW) */
+  setmode(fd, O_BINARY);
+#endif
   for (++argv; *argv; ++argv) {
     (void)!write(fd, *argv, my_strlen(*argv));
     (void)!write(fd, "\n", 1);

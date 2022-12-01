@@ -1,4 +1,3 @@
-/**/
 /*
  * x86_32.s: test file for as2nasm.pl, in GNU as (AT&T) syntax
  * by pts@fazekas.hu at Mon Nov 28 18:18:47 CET 2022

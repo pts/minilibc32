@@ -354,8 +354,8 @@ sub fix_reg($) {
 # hand-written .as files also work.
 #
 # !! Rename local labels (L_* and also non-.globl F_) by file: L1_* F2_*.
-sub as2nasm($$$$$$) {
-  my($srcfh, $outfh, $rodata_strs, $undefineds, $define_when_defined, $common_by_label) = @_;
+sub as2nasm($$$$$$$) {
+  my($srcfh, $outfh, $first_line, $rodata_strs, $undefineds, $define_when_defined, $common_by_label) = @_;
   my %unknown_directives;
   my $errc = 0;
   my $is_comment = 0;
@@ -366,7 +366,8 @@ sub as2nasm($$$$$$) {
   my %local_labels;
   my %global_labels;
   print $outfh "\nsection $section\n";
-  while (<$srcfh>) {
+  while (defined($first_line) or defined($first_line = <$srcfh>)) {
+    ($_, $first_line) = ($first_line, undef);
     if ($is_comment) {
       next if !s@\A.*[*]/@@s;  # End of multiline comment.
       $is_comment = 0;
@@ -767,14 +768,15 @@ sub as2nasm($$$$$$) {
 # source files won't work.
 #
 # The input file come from `wdis -a' or `wdis -a -fi'.
-sub wasm2nasm($$$) {
-  my($srcfh, $outfh, $rodata_strs) = @_;
+sub wasm2nasm($$$$) {
+  my($srcfh, $outfh, $first_line, $rodata_strs) = @_;
   my $section = ".text";
   my $segment = "";
   my $bss_org = 0;
   my $is_end = 0;
   my %segment_to_section = qw(_TEXT .text  CONST .rodata  CONST2 .rodata  _DATA .data  _BSS .bss);
-  while (<$srcfh>) {
+  while (defined($first_line) or defined($first_line = <$srcfh>)) {
+    ($_, $first_line) = ($first_line, undef);
     y@\r\n@@d;
     die "fatal: line after end ($.): $_\n" if $is_end;
     my $is_instr = s@^\t(?!\t)@@;  # Assembly instruction.
@@ -851,8 +853,8 @@ sub wasm2nasm($$$) {
 
 # ---
 
-sub detect_source_format($) {
-  my $srcfh = $_[0];
+sub detect_source_format($$) {
+  my($srcfh, $last_line_ref) = @_;
   my $hdr = "";
   while (length($hdr) < 4 and $hdr !~ m@\n@) {
     return undef if (read($srcfh, $hdr, 1, length($hdr)) or 0) != 1;
@@ -875,6 +877,7 @@ sub detect_source_format($) {
     } else {
       last if !defined($_ = <$srcfh>);
     }
+    $$last_line_ref = $_;
     if (!m@\S@) {
     } elsif (m@\A\s*[.](?:text|file)(?:\s|/[*])@ or m@\s*/[*]@) {
       return "as";
@@ -982,7 +985,8 @@ my $nasmfh;
 die "fatal: open NASM-assembly output file: $nasmfn: $!\n" if !open($nasmfh, ">", $nasmfn);
 binmode($nasmfh);
 
-my $srcfmt = detect_source_format($srcfh);
+my $first_line;
+my $srcfmt = detect_source_format($srcfh, \$first_line);
 if (defined($srcfmt) and $srcfmt eq "omf") {  # Run `wdis' to get (dis)assembly of the WASM syntax.
   close($srcfh);
   my $wasmfn = "$outfn.tmp.wdis";  # TODO(pts): Remove temporary files upon exit.
@@ -1000,7 +1004,7 @@ if (defined($srcfmt) and $srcfmt eq "omf") {  # Run `wdis' to get (dis)assembly 
   $srcfn = $wasmfn;
   die "fatal: open assembly source file: $srcfn: $!\n" if !open($srcfh, "<", $srcfn);
   binmode($srcfh);
-  $srcfmt = detect_source_format($srcfh);
+  $srcfmt = detect_source_format($srcfh, \$first_line);
 }
 die "fatal: source file format not recognized: $srcfn\n" if !defined($srcfmt);
 die "fatal: assembly source file already in NASM format: $srcfn\n" if $srcfmt eq "nasm";
@@ -1014,7 +1018,7 @@ print_nasm_header($nasmfh, $cpulevel, $data_alignment);
 if ($srcfmt eq "as") {
   print STDERR "info: converting from GNU as to NASM syntax: $srcfn to $nasmfn\n";
   my $undefineds = {};
-  $errc += as2nasm($srcfh, $nasmfh, $rodata_strs, $undefineds, $define_when_defined, $common_by_label);
+  $errc += as2nasm($srcfh, $nasmfh, $first_line, $rodata_strs, $undefineds, $define_when_defined, $common_by_label);
   print $nasmfh "\nsection .rodata\n" if $rodata_strs and @$rodata_strs;
   print_merged_strings_in_strdata($nasmfh, $rodata_strs, 1);
   if (%$undefineds) {
@@ -1025,7 +1029,7 @@ if ($srcfmt eq "as") {
   }
 } elsif ($srcfmt eq "wasm") {
   print STDERR "info: converting from WASM to NASM syntax: $srcfn to $nasmfn\n";
-  wasm2nasm($srcfh, $nasmfh, $rodata_strs);
+  wasm2nasm($srcfh, $nasmfh, $first_line, $rodata_strs);
   print $nasmfh "\nsection .rodata\n" if $rodata_strs and @$rodata_strs;
   print_merged_strings_in_strdata($nasmfh, $rodata_strs, 0);
 }

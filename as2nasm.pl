@@ -956,11 +956,13 @@ binmode($srcfh);
 my $outfh;
 die "fatal: open NASM-assembly output file: $outfn: $!\n" if !open($outfh, ">", $outfn);
 binmode($outfh);
+my @unlink_fns;
 
 my $srcfmt = detect_source_format($srcfh);
 if (defined($srcfmt) and $srcfmt eq "omf") {  # Run `wdis' to get (dis)assembly of the WASM syntax.
   close($srcfh);
   my $wasmfn = "$srcfn.tmp.wdis";  # TODO(pts): Remove temporary files upon exit.
+  push @unlink_fns, $wasmfn;
   my $srccmdfn = $srcfn;
   substr($srccmdfn, 0, 0) = "./" if $srccmdfn =~ m@-@;  # TODO(pts): Win32 compatibility.
   my @wdis_cmd = ("wdis", "-a", $srccmdfn);
@@ -1009,5 +1011,9 @@ print $outfh "\n_end\n";  # elf.inc.nasm
 print $outfh "\n; __END__\n";
 die "fatal: error writing NASM-assembly output\n" if !close($outfh);
 close($srcfh);
+
+# TODO(pts): Do it even on failure.
+for my $filename (@unlink_fns) { unlink($filename); }
+
 
 __END__

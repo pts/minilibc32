@@ -355,8 +355,8 @@ sub fix_reg($) {
 # hand-written .as files also work.
 #
 # !! Rename local labels (L_* and also non-.globl F_) by file: L1_* F2_*.
-sub as2nasm($$$$$$$) {
-  my($srcfh, $outfh, $first_line, $rodata_strs, $undefineds, $define_when_defined, $common_by_label) = @_;
+sub as2nasm($$$$$$$$) {
+  my($srcfh, $outfh, $first_line, $lc, $rodata_strs, $undefineds, $define_when_defined, $common_by_label) = @_;
   my %unknown_directives;
   my $errc = 0;
   my $is_comment = 0;
@@ -368,6 +368,7 @@ sub as2nasm($$$$$$$) {
   my %global_labels;
   print $outfh "\nsection $section\n";
   while (defined($first_line) or defined($first_line = <$srcfh>)) {
+    ++$lc;
     ($_, $first_line) = ($first_line, undef);
     if ($is_comment) {
       next if !s@\A.*[*]/@@s;  # End of multiline comment.
@@ -386,14 +387,14 @@ sub as2nasm($$$$$$$) {
     if (s@;.*@@s) {
       ++$errc;
       # TODO(pts): Support multiple instructions per line.
-      print STDERR "error: multiple instructions per line, all but the first ignored ($.): $_\n";
+      print STDERR "error: multiple instructions per line, all but the first ignored ($lc): $_\n";
     }
     next if !length($_);
     my @bad_labels;
     if (s@\A([^\s:,]+): *@@) {
       if (!length($section)) {
         ++$errc;
-        print STDERR "error: label outside section ($.): $_\n";
+        print STDERR "error: label outside section ($lc): $_\n";
       }
       my $label = fix_label($1, \@bad_labels, $used_labels, \%local_labels);
       if (length($section) == 1) {
@@ -421,14 +422,14 @@ sub as2nasm($$$$$$$) {
         print $outfh "global _start\n" if $label eq "F__start";  # !! TODO(pts): Indicate the entry point smarter.
         if (exists($defined_labels{$label})) {
           ++$errc;
-          print STDERR "error: label defined before .global ($.): $label\n";
+          print STDERR "error: label defined before .global ($lc): $label\n";
         }
         if ($label =~ m@\AL_@) {
           ++$errc;
-          print STDERR "error: local-prefix label cannot be declared .global ($.): $label\n";
+          print STDERR "error: local-prefix label cannot be declared .global ($lc): $label\n";
         } elsif ($label =~ m@\AS_@) {
           ++$errc;
-          print STDERR "error: label already .local before .global ($.): $label\n";
+          print STDERR "error: label already .local before .global ($lc): $label\n";
         } else {
           $global_labels{$label} = 1;
         }
@@ -436,20 +437,20 @@ sub as2nasm($$$$$$$) {
         my $label = fix_label($1, \@bad_labels, $used_labels, \%local_labels);
         if (exists($defined_labels{$label})) {
           ++$errc;
-          print STDERR "error: label defined before .local ($.): $label\n";
+          print STDERR "error: label defined before .local ($lc): $label\n";
         }
         if ($label =~ m@\AL_@) {
           ++$errc;
-          print STDERR "error: local-prefix label cannot be declared .local ($.): $label\n";
+          print STDERR "error: local-prefix label cannot be declared .local ($lc): $label\n";
         } elsif (exists($global_labels{$label})) {  # Must start with F_.
           ++$errc;
-          print STDERR "error: label already .global before .local ($.): $label\n";
+          print STDERR "error: label already .global before .local ($lc): $label\n";
         } elsif (exists($externs{$label})) {
           ++$errc;
-          print STDERR "error: label already .extern before .local ($.): $label\n";
+          print STDERR "error: label already .extern before .local ($lc): $label\n";
         } elsif ($label =~ m@\AF_@ and exists($used_labels->{$label})) {
           #++$errc;
-          #print STDERR "error: label already used as non-.local before .local ($.): $label\n";
+          #print STDERR "error: label already used as non-.local before .local ($lc): $label\n";
           my $label2 = $label;
           die if $label2 !~ s@\AF_@S_@;
           $define_when_defined->{$label2} = $label;
@@ -490,10 +491,10 @@ sub as2nasm($$$$$$$) {
         my $label = fix_label($1, \@bad_labels, $used_labels, \%local_labels);
         if ($label =~ m@\AL_@) {
           ++$errc;
-          print STDERR "error: local-prefix label cannot be declared .extern ($.): $label\n";
+          print STDERR "error: local-prefix label cannot be declared .extern ($lc): $label\n";
         } elsif ($label =~ m@\AS_@) {
           ++$errc;
-          print STDERR "error: label already .local before .extern ($.): $label\n";
+          print STDERR "error: label already .local before .extern ($lc): $label\n";
         } else {
           die "fatal: assert: bad .extern label: $label\n" if $label !~ m@\AF_@;
           $externs{$label} = 1;
@@ -501,19 +502,19 @@ sub as2nasm($$$$$$$) {
       } elsif (m@\A[.]comm ([^\s:,]+), *(0|[1-9]\d*), *(0|[1-9]\d*)\Z@) {
         if (length($section) <= 1) {
           ++$errc;
-          print STDERR "error: .comm outside section ($.): $_\n";
+          print STDERR "error: .comm outside section ($lc): $_\n";
         } else {
           # !! TODO(pts): Do a proper rearrangement of .comm within .bss based on alignment.
           my ($size, $alignment) = ($2 + 0, $3 + 0);
           if ($alignment & ($alignment - 1)) {
             ++$errc;
-            print STDERR "error: alignment value not a power of 2 ($.): $_\n";
+            print STDERR "error: alignment value not a power of 2 ($lc): $_\n";
             $alignment = 1;
           } elsif ($alignment < 2) {
             $alignment = 1;
           } elsif ($alignment > 4) {
             # See the comments at .align why.
-            print STDERR "warning: alignment value larger than 4 capped to 4 ($.): $_\n" if $alignment > 4;
+            print STDERR "warning: alignment value larger than 4 capped to 4 ($lc): $_\n" if $alignment > 4;
             $alignment = 4;
           }
           my $label = fix_label($1, \@bad_labels, $used_labels, \%local_labels);
@@ -529,21 +530,21 @@ sub as2nasm($$$$$$$) {
       } elsif (m@\A[.]align (0|[1-9]\d*)\Z@) {
         if (length($section) <= 1) {
           ++$errc;
-          print STDERR "error: .align outside section ($.): $_\n";
+          print STDERR "error: .align outside section ($lc): $_\n";
         } elsif ($section eq ".bss") {
           # We'd need `alignb'. Does it make sense? We don't even support .bss directly.
-          print STDERR "error: .align in .bss ignored ($.): $_\n" if !exists($unknown_directives{".align/bss"});
+          print STDERR "error: .align in .bss ignored ($lc): $_\n" if !exists($unknown_directives{".align/bss"});
           $unknown_directives{".align/bss"} = 1;
         } else {
           my $alignment = $1 + 0;
           if ($alignment & ($alignment - 1)) {
             ++$errc;
-            print STDERR "error: alignment value not a power of 2 ($.): $_\n";
+            print STDERR "error: alignment value not a power of 2 ($lc): $_\n";
           } elsif ($alignment > 1) {
             # For some global variables (especially char arrays), GCC
             # generates `.align 32'. It doesn't make sense, the user should
             # add __attribute__((aligned(4))) to the declaration.
-            print STDERR "warning: alignment value larger than 4 capped to 4 ($.): $_\n" if $alignment > 4;
+            print STDERR "warning: alignment value larger than 4 capped to 4 ($lc): $_\n" if $alignment > 4;
             # Also we'd need to increase $data_alignment for elf.inc.nasm
             # for $alignment > 4 to make any sense, and it's too late for
             # that.
@@ -554,7 +555,7 @@ sub as2nasm($$$$$$$) {
             $alignment = 4 if $alignment > 4;
             my $inst = ($section eq ".text") ? "nop" : "db 0";
             print $outfh "align $alignment, $inst\n";
-            #print STDERR "warning: align ignored ($.): $_\n" if !exists($unknown_directives{".align"});  # !!
+            #print STDERR "warning: align ignored ($lc): $_\n" if !exists($unknown_directives{".align"});  # !!
             #$unknown_directives{".align"} = 1;
           }
         }
@@ -563,7 +564,7 @@ sub as2nasm($$$$$$$) {
         my $expr = fix_labels($2, \@bad_labels, $used_labels, \%local_labels);
         if (length($section) <= 1) {
           ++$errc;
-          print STDERR "error: .$inst1 outside section ($.): $_\n";
+          print STDERR "error: .$inst1 outside section ($lc): $_\n";
         }
         my $inst = $inst1 eq "byte" ? "db" : $inst1 eq "value" ? "dw" : $inst1 eq "long" ? "dd" : "d?";
         print $outfh "$inst $expr\n";
@@ -571,7 +572,7 @@ sub as2nasm($$$$$$$) {
         my($inst1, $inst2, $data) = ($1, $2, $3);
         if (!length($section)) {
           ++$errc;
-          print STDERR "error: .$inst1 outside section ($.): $_\n";
+          print STDERR "error: .$inst1 outside section ($lc): $_\n";
         }
         # GNU as 2.30 does the escaping like this.
         $data =~ s@\\(?:([0-3][0-7]{2})|[xX]([0-9a-fA-F]{1,})|([bfnrtv])|(.))@
@@ -597,14 +598,14 @@ sub as2nasm($$$$$$$) {
         my $d = $1;
         ++$errc;
         if (!exists($unknown_directives{$d})) {
-          print STDERR "error: unknown directive $d ignored ($.): $_\n";
+          print STDERR "error: unknown directive $d ignored ($lc): $_\n";
           $unknown_directives{$d} = 1;
         }
       }
-    } elsif (s@\A([a-z][a-z0-9]*) *@@) {
+    } elsif (s@\A([a-z][a-z0-9]*) +@@) {
       if (length($section) <= 1) {
         ++$errc;
-        print STDERR "error: instruction outside section ($.): $_\n";
+        print STDERR "error: instruction outside section ($lc): $_\n";
       }
       my $inst = $1;
       $inst = "wait" if $inst eq "fwait";
@@ -618,7 +619,7 @@ sub as2nasm($$$$$$$) {
         goto check_labels if !length($_);
         $inst = "?";
         ++$errc;
-        print STDERR "error: no instruction after prefix ($.): $_\n";
+        print STDERR "error: no instruction after prefix ($lc): $_\n";
       }
       #print STDERR "INSA $inst $_\n";
       $inst = $inst_map{$inst} if exists($inst_map{$inst});
@@ -660,11 +661,11 @@ sub as2nasm($$$$$$$) {
         elsif (m@\G(?:%([a-z]s) *: *)?(?:([^%(),]+)|([^%(),]*)\(([^()]+)\))(?:, *|\Z)@gc) { push @args, fix_ea($1, defined($2) ? $2 : $3, defined($2) ? "" : $4, \@bad_labels, $used_labels, \%local_labels) }  # Effective address.
         elsif (m@\G([^,]*)(?:, *|\Z)@gc) {
           ++$errc;
-          print STDERR "error: bad instruction argument ($.): $1\n";
+          print STDERR "error: bad instruction argument ($lc): $1\n";
           push @args, "?";
         } else {
           my $rest = substr($_, pos($_));
-          die "fatal: assert: bad instruction argument ($.): $rest\n";
+          die "fatal: assert: bad instruction argument ($lc): $rest\n";
         }
       }
       @args = reverse(@args);
@@ -687,13 +688,13 @@ sub as2nasm($$$$$$$) {
           $inst .= "?";
           @args = reverse(@args);
           ++$errc;
-          print STDERR "error: nop argument too complex for NASM 0.98.39 ($.): $inst $_\n";
+          print STDERR "error: nop argument too complex for NASM 0.98.39 ($lc): $inst $_\n";
         }
       } elsif (exists($str_arg_insts{$inst})) {
         my $suffix = ((grep { $_ eq "al" } @args) ? "b" : "") . ((grep { $_ eq "ax" } @args) ? "w" : "") . ((grep { $_ eq "eax" } @args) ? "d" : "");
         if (length($suffix) != 1) {
           ++$errc;
-          print STDERR "error: unrecognized string instruction size $suffix ($.): $inst $_\n";
+          print STDERR "error: unrecognized string instruction size $suffix ($lc): $inst $_\n";
           $suffix = "?";
         }
         $inst .= $suffix;
@@ -714,7 +715,7 @@ sub as2nasm($$$$$$$) {
         # dword and word mixed). This one has been fixed in NASM 2.13.02 (or
         # earlier).
         ++$errc;
-        print STDERR "error: fisttpll args too complex for buggy NASM 0.98.39 ($.): $inst $_\n";
+        print STDERR "error: fisttpll args too complex for buggy NASM 0.98.39 ($lc): $inst $_\n";
       } elsif ($inst eq "monitor") {
         @args = () if @args == 3 and "@args" eq "edx ecx eax";
       } elsif ($inst eq "mwait") {
@@ -731,12 +732,12 @@ sub as2nasm($$$$$$$) {
       # https://stackoverflow.com/a/73317832
     } else {
       ++$errc;
-      print STDERR "error: instruction or directive expected ($.): $_\n";
+      print STDERR "error: instruction or directive expected ($lc): $_\n";
     }
    check_labels:
     for my $label (@bad_labels) {
       ++$errc;
-      print STDERR "error: bad label syntax ($.): $label\n";
+      print STDERR "error: bad label syntax ($lc): $label\n";
     }
   }
   if (0 and $rodata_strs and @$rodata_strs) {  # For debugging: don't merge (optimize) anything.
@@ -769,24 +770,25 @@ sub as2nasm($$$$$$$) {
 # source files won't work.
 #
 # The input file come from `wdis -a' or `wdis -a -fi'.
-sub wasm2nasm($$$$) {
-  my($srcfh, $outfh, $first_line, $rodata_strs) = @_;
+sub wasm2nasm($$$$$) {
+  my($srcfh, $outfh, $first_line, $lc, $rodata_strs) = @_;
   my $section = ".text";
   my $segment = "";
   my $bss_org = 0;
   my $is_end = 0;
   my %segment_to_section = qw(_TEXT .text  CONST .rodata  CONST2 .rodata  _DATA .data  _BSS .bss);
   while (defined($first_line) or defined($first_line = <$srcfh>)) {
+    ++$lc;
     ($_, $first_line) = ($first_line, undef);
     y@\r\n@@d;
-    die "fatal: line after end ($.): $_\n" if $is_end;
+    die "fatal: line after end ($lc): $_\n" if $is_end;
     my $is_instr = s@^\t(?!\t)@@;  # Assembly instruction.
     s@;.*@@;
     s@^\s+@@;
     s@\s+@ @g;
     if ($is_instr) {
-      die "$0: unsupported instruction in non-.text ($.): $_\n" if $section ne ".text";
-      die "$0: unsupported quote in instruction ($.): $_\n" if m@'@;  # Whitespace is already gone.
+      die "$0: unsupported instruction in non-.text ($lc): $_\n" if $section ne ".text";
+      die "$0: unsupported quote in instruction ($lc): $_\n" if m@'@;  # Whitespace is already gone.
       if (s~^(jmp|call) near ptr (?:FLAT:)?~$1 \$~) {
       } else {
         s@, *@, @g;
@@ -818,7 +820,7 @@ sub wasm2nasm($$$$) {
       }
     } elsif (s@^(D[BWD])(?= )@@i) {
       my $cmd = lc($1);
-      die "$0: unsupported quote in data $cmd ($.): $_\n" if m@'@;  # Whitespace is already gone.
+      die "$0: unsupported quote in data $cmd ($lc): $_\n" if m@'@;  # Whitespace is already gone.
       s@\boffset FLAT:@\$@g if !m@'@;
       if ($rodata_strs and $segment eq "CONST") {  # C string literals.
         push @$rodata_strs, $cmd . $_;
@@ -833,10 +835,10 @@ sub wasm2nasm($$$$) {
     } elsif (m@^(\S+) ENDS$@) {
       die "fatal: unexpected segment end: $1\n" if $1 ne $segment;
     } elsif (m@^ORG @) {
-      die "fatal: bad org instruction ($.): $_\n" if
+      die "fatal: bad org instruction ($lc): $_\n" if
           !m@^ORG (?:([0-9])|([0-9][0-9a-fA-F]*)[hH])$@ or $section ne ".bss";
       my $delta_bss_org = (defined($1) ? ($1 + 0) : hex($2)) - $bss_org;
-      die "fatal: .bss org decreasing ($.): $_\n" if $delta_bss_org < 0;
+      die "fatal: .bss org decreasing ($lc): $_\n" if $delta_bss_org < 0;
       if ($delta_bss_org != 0) {
         print $outfh "resb $delta_bss_org\n";
       }
@@ -847,16 +849,17 @@ sub wasm2nasm($$$$) {
       $is_end = 1;
     } elsif (!length($_) or m@^PUBLIC @ or m@^DGROUP GROUP@ or m@^ASSUME @) {  # Ignore.
     } else {
-      die "fatal: unsupported WASM instruction ($.): $_\n" ;
+      die "fatal: unsupported WASM instruction ($lc): $_\n" ;
     }
   }
 }
 
 # ---
 
-sub detect_source_format($$) {
-  my($srcfh, $last_line_ref) = @_;
+sub detect_source_format($$$) {
+  my($srcfh, $last_line_ref, $lc_ref) = @_;
   my $hdr = "";
+  $$lc_ref = 0;
   while (length($hdr) < 4 and $hdr !~ m@\n@) {
     return undef if (read($srcfh, $hdr, 1, length($hdr)) or 0) != 1;
   }
@@ -872,6 +875,7 @@ sub detect_source_format($$) {
     return "macho";  # Can  be executable, object etc.
   }
   for (;;) {
+    ++$$lc_ref;
     if (defined($hdr)) {
       $hdr .= $_ if $hdr !~ m@\n@ and defined($_ = <$srcfh>);
       ($_, $hdr) = ($hdr, undef);
@@ -890,7 +894,7 @@ sub detect_source_format($$) {
     #  $can_be_as = 0;
     } else {
       chomp;
-      die "error: assembly source file not detected ($.): $_\n";
+      die "error: assembly source file not detected (${$lc_ref}): $_\n";
       last
     }
   }
@@ -987,7 +991,8 @@ die "fatal: open NASM-assembly output file: $nasmfn: $!\n" if !open($nasmfh, ">"
 binmode($nasmfh);
 
 my $first_line;
-my $srcfmt = detect_source_format($srcfh, \$first_line);
+my $lc = 0;
+my $srcfmt = detect_source_format($srcfh, \$first_line, \$lc);
 if (defined($srcfmt) and $srcfmt eq "omf") {  # Run `wdis' to get (dis)assembly of the WASM syntax.
   close($srcfh);
   my $wasmfn = "$outfn.tmp.wdis";  # TODO(pts): Remove temporary files upon exit.
@@ -1005,7 +1010,7 @@ if (defined($srcfmt) and $srcfmt eq "omf") {  # Run `wdis' to get (dis)assembly 
   $srcfn = $wasmfn;
   die "fatal: open assembly source file: $srcfn: $!\n" if !open($srcfh, "<", $srcfn);
   binmode($srcfh);
-  $srcfmt = detect_source_format($srcfh, \$first_line);
+  $srcfmt = detect_source_format($srcfh, \$first_line, \$lc);
 }
 die "fatal: source file format not recognized: $srcfn\n" if !defined($srcfmt);
 die "fatal: assembly source file already in NASM format: $srcfn\n" if $srcfmt eq "nasm";
@@ -1018,10 +1023,11 @@ my $common_by_label = {};
 my $mydirp = ($0 =~ m@\A(.*/)@ ? $1 : "");  # TODO(pts): Win32 compatibility.
 $mydirp = "" if $mydirp =~ m@\A[.]/+@;
 print_nasm_header($nasmfh, $cpulevel, $data_alignment, $mydirp);
+--$lc;  # We reuse $first_line.
 if ($srcfmt eq "as") {
   print STDERR "info: converting from GNU as to NASM syntax: $srcfn to $nasmfn\n";
   my $undefineds = {};
-  $errc += as2nasm($srcfh, $nasmfh, $first_line, $rodata_strs, $undefineds, $define_when_defined, $common_by_label);
+  $errc += as2nasm($srcfh, $nasmfh, $first_line, $lc, $rodata_strs, $undefineds, $define_when_defined, $common_by_label);
   print $nasmfh "\nsection .rodata\n" if $rodata_strs and @$rodata_strs;
   print_merged_strings_in_strdata($nasmfh, $rodata_strs, 1);
   if (%$undefineds) {
@@ -1032,7 +1038,7 @@ if ($srcfmt eq "as") {
   }
 } elsif ($srcfmt eq "wasm") {
   print STDERR "info: converting from WASM to NASM syntax: $srcfn to $nasmfn\n";
-  wasm2nasm($srcfh, $nasmfh, $first_line, $rodata_strs);
+  wasm2nasm($srcfh, $nasmfh, $first_line, $lc, $rodata_strs);
   print $nasmfh "\nsection .rodata\n" if $rodata_strs and @$rodata_strs;
   print_merged_strings_in_strdata($nasmfh, $rodata_strs, 0);
 }

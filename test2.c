@@ -1,4 +1,10 @@
-/* Test 64-bit integer multiplication, division and modulo. */
+/* Test 64-bit integer multiplication, division and modulo.
+ *
+ * Example test run:
+ *
+ * $ ./test2... 1234567890123456789 9876543210
+ * 8626543209
+ */
 
 #include "libc.h"
 
@@ -20,7 +26,7 @@ static const char *format_ll_dec(long long i) {
   *p = '\0';
   do {
     *--p = (char)(u % 10) + '0';
-#if 1
+#if 0
     u /= 10;
 #else
     *(long long*)&u /= 10;

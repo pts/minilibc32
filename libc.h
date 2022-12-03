@@ -65,7 +65,7 @@ typedef int pid_t;
 
 /* --- 64-bit integer multiplication, division, modulo and shifts. */
 
-#ifdef __GNUC__  /* !! Doesn't help, GCC still calls them with ((regparm(3)). */
+#if 0 && defined(__GNUC__)  /* This doesn't help, GCC still calls them with regparm(3), see also https://patchwork.ozlabs.org/project/uboot/patch/20171117060228.23926-1-sr@denx.de/ for a workaround. */
 __extension__ extern unsigned long long __attribute__((regparm(0))) __udivdi3(unsigned long long a, unsigned long long b);
 __extension__ extern unsigned long long __attribute__((regparm(0))) __umoddi3(unsigned long long a, unsigned long long b);
 __extension__ extern long long __attribute__((regparm(0))) __divdi3(long long a, long long b);

@@ -335,7 +335,7 @@ sub fix_ea($$$$$$) {
   $regs =~ s@,@*@;  # Only the second ','.
   # We could do more syntax checks here.
   if ($displacement =~ m@[^ ]@) {
-    $displacement = "+" . $displacement if length($regs);
+    $displacement = "+" . $displacement if length($regs) and $displacement !~ m@\A-(?:0[xX][0-9a-fA-F]+|0|[1-9]\d*)\Z(?!\n)@;
     $displacement = fix_labels($displacement, $bad_labels, $used_labels, $local_labels);
   }
   $segreg = (defined($segreg) and length($segreg)) ? "$segreg:" : "";

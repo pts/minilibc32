@@ -19,7 +19,7 @@
 #endif
 #if __LIBC_OK
 
-#if defined(__GNUC__)
+#ifdef __GNUC__
 #  define __LIBC_CALL __attribute__((regparm(3)))
 #  define __LIBC_FUNC(name, args) __LIBC_CALL name args __asm__(#name "__RP3__")
 #  define __LIBC_NORETURN __attribute__((noreturn, nothrow))
@@ -62,6 +62,15 @@ typedef int ssize_t;
 typedef unsigned mode_t;
 typedef long off_t;  /* Not implemented: 64-bit off_t (#define _FILE_OFFSET_BITS 64), off64_r, lseek64(2). */
 typedef int pid_t;
+
+/* --- 64-bit integer multiplication, division, modulo and shifts. */
+
+#ifdef __GNUC__  /* !! Doesn't help, GCC still calls them with ((regparm(3)). */
+__extension__ extern unsigned long long __attribute__((regparm(0))) __udivdi3(unsigned long long a, unsigned long long b);
+__extension__ extern unsigned long long __attribute__((regparm(0))) __umoddi3(unsigned long long a, unsigned long long b);
+__extension__ extern long long __attribute__((regparm(0))) __divdi3(long long a, long long b);
+__extension__ extern long long __attribute__((regparm(0))) __moddi3(long long a, long long b);
+#endif
 
 /* --- <stdarg.h> */
 

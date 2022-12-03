@@ -1,11 +1,12 @@
 /*
- * minilibc32.s: GNU as fork in minilibc32.nasm
+ * minilibc32.s: GNU as fork of minilibc32.nasm
  * by pts@fazekas.hu at Sun Nov 27 18:38:33 CET 2022
  *
  * Compile: as -32 -march=i386 -o minilibc32a.o minilibc32.s
  *
  * This source file was manually translated by minilibc32.nasm from NASM to
  * its current GNU as syntax, to be used on Linux i386 with GCC.
+ * OpenWatcom C compiler is not supported, see minilibc32.nasm for that.
  *
  * GNU as is smart enough to encode the shorter (2-byte) versions of `push'
  * and `jmp' if the constants are small.
@@ -240,6 +241,644 @@ __do_syscall3:
 		pop %edx
 		pop %ebx
 		ret
+
+/* --- 64-bit integer multiplication, division and modulo. */
+
+.globl __divdi3  /* regparm(3). */
+.type  __divdi3, @function
+__divdi3:
+		push %ebp
+		mov %esp, %ebp
+		push 0xc(%ebp)
+		push 0x8(%ebp)
+		push %edx
+		push %eax
+		call __divdi3__RP0__
+		leave
+		ret
+
+.globl __divdi3
+.type  __divdi3, @function
+__divdi3__RP0__:  /* No __RP3__ suffix. */
+		push   %ebp
+		mov    %esp,%ebp
+		push   %edi
+		push   %esi
+		sub    $0x30,%esp
+		mov    0xc(%ebp),%edx
+		mov    0x8(%ebp),%eax
+		mov    0x10(%ebp),%esi
+		mov    0x14(%ebp),%edi
+		mov    %edx,-0x24(%ebp)
+		mov    -0x24(%ebp),%ecx
+		mov    %eax,-0x28(%ebp)
+		mov    %esi,%eax
+		movl   $0x0,-0x30(%ebp)
+		mov    %edi,%edx
+		movl   $0x0,-0x2c(%ebp)
+		test   %ecx,%ecx
+		movl   $0x0,-0x1c(%ebp)
+		js     .L1143
+.L13e:		test   %edi,%edi
+		js     .L1130
+.L146:		mov    %edx,%edi
+		mov    %eax,%esi
+		mov    -0x28(%ebp),%edx
+		mov    %eax,%ecx
+		mov    -0x24(%ebp),%eax
+		test   %edi,%edi
+		mov    %edx,-0x10(%ebp)
+		mov    %eax,-0x14(%ebp)
+		jne    .L180
+		cmp    %eax,%esi
+		ja     .L1b1
+		test   %esi,%esi
+		je     .L1180
+.L168:		mov    -0x14(%ebp),%eax
+		mov    %edi,%edx
+		div    %ecx
+		mov    %eax,%esi
+		mov    -0x10(%ebp),%eax
+		div    %ecx
+		mov    %eax,%ecx
+		mov    %esi,%eax
+		jmp    .L190
+.L180:		cmp    -0x14(%ebp),%edi
+		jbe    .L1c0
+.L185:		xor    %ecx,%ecx
+		xor    %eax,%eax
+.L190:		mov    %ecx,-0x30(%ebp)
+		mov    -0x1c(%ebp),%ecx
+		mov    %eax,-0x2c(%ebp)
+		mov    -0x30(%ebp),%eax
+		mov    -0x2c(%ebp),%edx
+		test   %ecx,%ecx
+		je     .L1aa
+		neg    %eax
+		adc    $0x0,%edx
+		neg    %edx
+.L1aa:		add    $0x30,%esp
+		pop    %esi
+		pop    %edi
+		pop    %ebp
+		ret
+.L1b1:		mov    %edx,%eax
+		mov    -0x14(%ebp),%edx
+		div    %esi
+		mov    %eax,%ecx
+		xor    %eax,%eax
+		jmp    .L190
+		mov    %esi,%esi
+.L1c0:		bsr    %edi,%eax
+		xor    $0x1f,%eax
+		mov    %eax,-0x18(%ebp)
+		je     .L1160
+		mov    -0x18(%ebp),%edx
+		mov    $0x20,%eax
+		movzbl -0x18(%ebp),%ecx
+		sub    %edx,%eax
+		mov    %edi,%edx
+		mov    %eax,-0xc(%ebp)
+		shl    %cl,%edx
+		mov    %esi,%eax
+		movzbl -0xc(%ebp),%ecx
+		mov    %edx,%edi
+		mov    -0x10(%ebp),%edx
+		shr    %cl,%eax
+		movzbl -0x18(%ebp),%ecx
+		or     %eax,%edi
+		mov    -0x14(%ebp),%eax
+		shl    %cl,%esi
+		shl    %cl,%eax
+		movzbl -0xc(%ebp),%ecx
+		shr    %cl,%edx
+		or     %edx,%eax
+		mov    -0x14(%ebp),%edx
+		mov    %eax,-0x34(%ebp)
+		shr    %cl,%edx
+		div    %edi
+.L1110:		mov    %edx,-0x34(%ebp)
+		mov    %eax,-0x38(%ebp)
+		mul    %esi
+		cmp    %edx,-0x34(%ebp)
+		mov    %eax,%edi
+		jb     .L119d
+		je     .L1190
+.L1121:		mov    -0x38(%ebp),%ecx
+		xor    %eax,%eax
+		jmp    .L190
+.L1130:		mov    %esi,%eax
+		mov    %edi,%edx
+		neg    %eax
+		adc    $0x0,%edx
+.L1139:		neg    %edx
+		notl   -0x1c(%ebp)
+		jmp    .L146
+.L1143:		negl   -0x28(%ebp)
+		movl   $0xffffffff,-0x1c(%ebp)
+		adcl   $0x0,-0x24(%ebp)
+		negl   -0x24(%ebp)
+		jmp    .L13e
+.L1160:		cmp    -0x14(%ebp),%edi
+		jb     .L116e
+		cmp    -0x10(%ebp),%esi
+		ja     .L185
+.L116e:		mov    $0x1,%ecx
+		xor    %eax,%eax
+		jmp    .L190
+.L1180:		mov    $0x1,%eax
+		xor    %edx,%edx
+		div    %esi
+		mov    %eax,%ecx
+		jmp    .L168
+.L1190:		mov    -0x10(%ebp),%eax
+		movzbl -0x18(%ebp),%ecx
+		shl    %cl,%eax
+		cmp    %edi,%eax
+		jae    .L1121
+.L119d:		mov    -0x38(%ebp),%ecx
+		xor    %eax,%eax
+		dec    %ecx
+		jmp    .L190
+
+.globl __udivdi3  /* regparm(3). */
+.type  __udivdi3, @function
+__udivdi3:
+		push %ebp
+		mov %esp, %ebp
+		push 0xc(%ebp)
+		push 0x8(%ebp)
+		push %edx
+		push %eax
+		call __udivdi3__RP0__
+		leave
+		ret
+
+.globl __udivdi3__RP0__
+.type  __udivdi3__RP0__, @function
+__udivdi3__RP0__:  /* No __RP3__ suffix. */
+		push   %ebp
+		mov    %esp,%ebp
+		push   %edi
+		push   %esi
+		sub    $0x28,%esp
+		mov    0x10(%ebp),%eax
+		mov    0x14(%ebp),%edx
+		movl   $0x0,-0x28(%ebp)
+		movl   $0x0,-0x24(%ebp)
+		mov    %eax,-0xc(%ebp)
+		mov    %eax,%ecx
+		mov    0x8(%ebp),%eax
+		mov    %edx,%edi
+		mov    0xc(%ebp),%edx
+		test   %edi,%edi
+		mov    %eax,-0x14(%ebp)
+		mov    %edx,-0x18(%ebp)
+		jne    .L263
+		cmp    %edx,%ecx
+		jbe    .L2d5
+		div    %ecx
+		mov    %eax,%ecx
+		xor    %eax,%eax
+.L250:		mov    %eax,-0x24(%ebp)
+		mov    %ecx,-0x28(%ebp)
+		mov    -0x24(%ebp),%edx
+		mov    -0x28(%ebp),%eax
+		add    $0x28,%esp
+		pop    %esi
+		pop    %edi
+		pop    %ebp
+		ret
+.L263:		cmp    -0x18(%ebp),%edi
+		ja     .L2100
+		bsr    %edi,%eax
+		xor    $0x1f,%eax
+		mov    %eax,-0x1c(%ebp)
+		je     .L2f3
+		mov    -0x1c(%ebp),%edx
+		mov    $0x20,%eax
+		movzbl -0x1c(%ebp),%ecx
+		mov    -0xc(%ebp),%esi
+		sub    %edx,%eax
+		mov    %edi,%edx
+		mov    %eax,-0x10(%ebp)
+		shl    %cl,%edx
+		mov    -0xc(%ebp),%eax
+		movzbl -0x10(%ebp),%ecx
+		mov    %edx,%edi
+		mov    -0x14(%ebp),%edx
+		shr    %cl,%eax
+		movzbl -0x1c(%ebp),%ecx
+		or     %eax,%edi
+		mov    -0x18(%ebp),%eax
+		shl    %cl,%esi
+		shl    %cl,%eax
+.L2aa:		movzbl -0x10(%ebp),%ecx
+		shr    %cl,%edx
+		or     %edx,%eax
+		mov    -0x18(%ebp),%edx
+		mov    %eax,-0x2c(%ebp)
+		shr    %cl,%edx
+		div    %edi
+		mov    %edx,%edi
+		mov    %eax,-0x30(%ebp)
+		mul    %esi
+		cmp    %edx,%edi
+		mov    %eax,%esi
+		jb     .L2139
+		je     .L212c
+.L2cb:		mov    -0x30(%ebp),%ecx
+		xor    %eax,%eax
+		jmp    .L250
+.L2d5:		mov    -0xc(%ebp),%esi
+		test   %esi,%esi
+		je     .L2110
+.L2dc:		mov    -0x18(%ebp),%eax
+		mov    %edi,%edx
+		div    %ecx
+		mov    %eax,%esi
+		mov    -0x14(%ebp),%eax
+		div    %ecx
+		mov    %eax,%ecx
+		mov    %esi,%eax
+		jmp    .L250
+.L2f3:		cmp    -0x18(%ebp),%edi
+		jb     .L2120
+		mov    -0x14(%ebp),%edx
+		cmp    %edx,-0xc(%ebp)
+		jbe    .L2120
+.L2100:		xor    %ecx,%ecx
+		xor    %eax,%eax
+		jmp    .L250
+.L2110:		mov    $0x1,%eax
+		xor    %edx,%edx
+		divl   -0xc(%ebp)
+		mov    %eax,%ecx
+		jmp    .L2dc
+		mov    %esi,%esi
+.L2120:		mov    $0x1,%ecx
+		xor    %eax,%eax
+		jmp    .L250
+.L212c:		mov    -0x14(%ebp),%eax
+		movzbl -0x1c(%ebp),%ecx
+		shl    %cl,%eax
+		cmp    %esi,%eax
+		jae    .L2cb
+.L2139:		mov    -0x30(%ebp),%ecx
+		xor    %eax,%eax
+		dec    %ecx
+		jmp    .L250
+
+.globl __moddi3  /* regparm(3). */
+.type  __moddi3, @function
+__moddi3:
+		push %ebp
+		mov %esp, %ebp
+		push 0xc(%ebp)
+		push 0x8(%ebp)
+		push %edx
+		push %eax
+		call __moddi3__RP0__
+		leave
+		ret
+
+.globl __moddi3__RP0__
+.type  __moddi3__RP0__, @function
+__moddi3__RP0__:  /* No __RP3__ suffix. */
+		push   %ebp
+		mov    %esp,%ebp
+		push   %edi
+		push   %esi
+		sub    $0x50,%esp
+		mov    0xc(%ebp),%edi
+		mov    0x10(%ebp),%eax
+		mov    0x14(%ebp),%edx
+		movl   $0x0,-0x48(%ebp)
+		mov    0x8(%ebp),%esi
+		test   %edi,%edi
+		movl   $0x0,-0x44(%ebp)
+		mov    %eax,-0x50(%ebp)
+		mov    %edx,-0x4c(%ebp)
+		movl   $0x0,-0x3c(%ebp)
+		js     .L31a2
+.L337:		mov    -0x4c(%ebp),%ecx
+		test   %ecx,%ecx
+		js     .L3190
+.L342:		lea    -0x10(%ebp),%ecx
+		test   %edx,%edx
+		mov    %ecx,-0x24(%ebp)
+		mov    %eax,%ecx
+		mov    %eax,-0x28(%ebp)
+		mov    %edx,-0x2c(%ebp)
+		mov    %esi,-0x20(%ebp)
+		mov    %edi,-0x34(%ebp)
+		jne    .L382
+		cmp    %edi,%eax
+		mov    %edi,%edx
+		jbe    .L3170
+		mov    %esi,%eax
+		div    %ecx
+.L368:		mov    %edx,-0x48(%ebp)
+		movl   $0x0,-0x44(%ebp)
+.L372:		mov    -0x24(%ebp),%ecx
+		mov    -0x48(%ebp),%eax
+		mov    -0x44(%ebp),%edx
+		mov    %eax,(%ecx)
+		mov    %edx,0x4(%ecx)
+		jmp    .L3a0
+.L382:		mov    -0x34(%ebp),%eax
+		cmp    %eax,-0x2c(%ebp)
+		jbe    .L3c0
+		mov    %esi,-0x48(%ebp)
+		mov    %edi,-0x44(%ebp)
+		mov    -0x48(%ebp),%edx
+		mov    -0x44(%ebp),%ecx
+		mov    %edx,-0x10(%ebp)
+		mov    %ecx,-0xc(%ebp)
+.L3a0:		mov    -0x3c(%ebp),%eax
+		test   %eax,%eax
+		je     .L3b1
+		negl   -0x10(%ebp)
+		adcl   $0x0,-0xc(%ebp)
+		negl   -0xc(%ebp)
+.L3b1:		mov    -0x10(%ebp),%eax
+		mov    -0xc(%ebp),%edx
+		add    $0x50,%esp
+		pop    %esi
+		pop    %edi
+		pop    %ebp
+		ret
+		mov    %esi,%esi
+.L3c0:		bsr    -0x2c(%ebp),%eax
+		xor    $0x1f,%eax
+		mov    %eax,-0x38(%ebp)
+		je     .L31c3
+		mov    -0x38(%ebp),%edx
+		mov    $0x20,%eax
+		movzbl -0x38(%ebp),%ecx
+		mov    -0x28(%ebp),%esi
+		mov    -0x20(%ebp),%edi
+		sub    %edx,%eax
+		mov    -0x2c(%ebp),%edx
+		mov    %eax,-0x30(%ebp)
+		mov    -0x28(%ebp),%eax
+		shl    %cl,%edx
+		movzbl -0x30(%ebp),%ecx
+		shr    %cl,%eax
+		movzbl -0x38(%ebp),%ecx
+		or     %eax,%edx
+		mov    -0x34(%ebp),%eax
+		mov    %edx,-0x1c(%ebp)
+		mov    -0x20(%ebp),%edx
+		shl    %cl,%esi
+		shl    %cl,%eax
+		movzbl -0x30(%ebp),%ecx
+		shr    %cl,%edx
+		movzbl -0x38(%ebp),%ecx
+		or     %edx,%eax
+		mov    -0x34(%ebp),%edx
+		shl    %cl,%edi
+		movzbl -0x30(%ebp),%ecx
+		shr    %cl,%edx
+		divl   -0x1c(%ebp)
+		mov    %edx,-0x54(%ebp)
+		mul    %esi
+		cmp    %edx,-0x54(%ebp)
+		jb     .L320d
+		je     .L3205
+.L3136:		mov    -0x54(%ebp),%ecx
+		sub    %eax,%edi
+		sbb    %edx,%ecx
+		mov    %ecx,-0x54(%ebp)
+		mov    %ecx,%edx
+		movzbl -0x30(%ebp),%ecx
+		mov    %edi,%eax
+		shl    %cl,%edx
+		movzbl -0x38(%ebp),%ecx
+		shr    %cl,%eax
+		or     %eax,%edx
+		mov    -0x54(%ebp),%eax
+		mov    %edx,-0x48(%ebp)
+		mov    -0x48(%ebp),%edx
+		shr    %cl,%eax
+		mov    %eax,-0x44(%ebp)
+		mov    -0x24(%ebp),%eax
+		mov    -0x44(%ebp),%ecx
+		mov    %edx,(%eax)
+		mov    %ecx,0x4(%eax)
+		jmp    .L3a0
+.L3170:		mov    -0x28(%ebp),%esi
+		test   %esi,%esi
+		je     .L31b5
+.L3177:		mov    -0x34(%ebp),%eax
+		mov    -0x2c(%ebp),%edx
+		div    %ecx
+		mov    -0x20(%ebp),%eax
+		div    %ecx
+		jmp    .L368
+.L3190:		mov    -0x50(%ebp),%eax
+		mov    -0x4c(%ebp),%edx
+		neg    %eax
+		adc    $0x0,%edx
+		neg    %edx
+		jmp    .L342
+.L31a2:		neg    %esi
+		adc    $0x0,%edi
+		neg    %edi
+		movl   $0xffffffff,-0x3c(%ebp)
+		jmp    .L337
+.L31b5:		mov    $0x1,%eax
+		xor    %edx,%edx
+		divl   -0x28(%ebp)
+		mov    %eax,%ecx
+		jmp    .L3177
+.L31c3:		mov    -0x34(%ebp),%ecx
+		cmp    %ecx,-0x2c(%ebp)
+		jb     .L31f1
+		mov    -0x20(%ebp),%eax
+		cmp    %eax,-0x28(%ebp)
+		jbe    .L31f1
+.L31e0:		mov    -0x20(%ebp),%eax
+		mov    -0x34(%ebp),%edx
+		mov    %eax,-0x48(%ebp)
+		mov    %edx,-0x44(%ebp)
+		jmp    .L372
+.L31f1:		mov    -0x34(%ebp),%edx
+		mov    -0x20(%ebp),%ecx
+		sub    -0x28(%ebp),%ecx
+		sbb    -0x2c(%ebp),%edx
+		mov    %ecx,-0x20(%ebp)
+		mov    %edx,-0x34(%ebp)
+		jmp    .L31e0
+.L3205:		cmp    %eax,%edi
+		jae    .L3136
+.L320d:		sub    %esi,%eax
+		sbb    -0x1c(%ebp),%edx
+		jmp    .L3136
+
+.globl __umoddi3  /* regparm(3). */
+.type  __umoddi3, @function
+__umoddi3:
+		push %ebp
+		mov %esp, %ebp
+		push 0xc(%ebp)
+		push 0x8(%ebp)
+		push %edx
+		push %eax
+		call __umoddi3__RP0__
+		leave
+		ret
+
+.globl __umoddi3__RP0__
+.type  __umoddi3__RP0__, @function
+__umoddi3__RP0__:  /* No __RP3__ suffix. */
+		push   %ebp
+		mov    %esp,%ebp
+		push   %edi
+		push   %esi
+		sub    $0x30,%esp
+		mov    0x14(%ebp),%edx
+		mov    0x10(%ebp),%eax
+		mov    0x8(%ebp),%esi
+		mov    0xc(%ebp),%edi
+		test   %edx,%edx
+		movl   $0x0,-0x30(%ebp)
+		mov    %eax,%ecx
+		movl   $0x0,-0x2c(%ebp)
+		mov    %eax,-0x14(%ebp)
+		mov    %edx,-0x18(%ebp)
+		mov    %esi,-0x10(%ebp)
+		mov    %edi,-0x20(%ebp)
+		jne    .L460
+		cmp    %edi,%eax
+		mov    %edi,%edx
+		jbe    .L4130
+		mov    %esi,%eax
+		div    %ecx
+.L442:		mov    %edx,-0x30(%ebp)
+		movl   $0x0,-0x2c(%ebp)
+		mov    -0x30(%ebp),%eax
+		mov    -0x2c(%ebp),%edx
+		add    $0x30,%esp
+		pop    %esi
+		pop    %edi
+		pop    %ebp
+		ret
+.L460:		mov    -0x20(%ebp),%ecx
+		cmp    %ecx,-0x18(%ebp)
+		jbe    .L480
+		mov    %esi,-0x30(%ebp)
+		mov    %edi,-0x2c(%ebp)
+		mov    -0x30(%ebp),%eax
+		mov    -0x2c(%ebp),%edx
+		add    $0x30,%esp
+		pop    %esi
+		pop    %edi
+		pop    %ebp
+		ret
+.L480:		bsr    -0x18(%ebp),%eax
+		xor    $0x1f,%eax
+		mov    %eax,-0x24(%ebp)
+		je     .L4160
+		mov    -0x24(%ebp),%edx
+		mov    $0x20,%eax
+		movzbl -0x24(%ebp),%ecx
+		mov    -0x14(%ebp),%esi
+		mov    -0x10(%ebp),%edi
+		sub    %edx,%eax
+		mov    -0x18(%ebp),%edx
+		mov    %eax,-0x1c(%ebp)
+		mov    -0x14(%ebp),%eax
+		shl    %cl,%edx
+		movzbl -0x1c(%ebp),%ecx
+		shr    %cl,%eax
+		movzbl -0x24(%ebp),%ecx
+		or     %eax,%edx
+		mov    -0x20(%ebp),%eax
+		mov    %edx,-0xc(%ebp)
+		mov    -0x10(%ebp),%edx
+		shl    %cl,%esi
+		shl    %cl,%eax
+		movzbl -0x1c(%ebp),%ecx
+		shr    %cl,%edx
+		movzbl -0x24(%ebp),%ecx
+		or     %edx,%eax
+		mov    -0x20(%ebp),%edx
+		shl    %cl,%edi
+		movzbl -0x1c(%ebp),%ecx
+		shr    %cl,%edx
+		divl   -0xc(%ebp)
+		mov    %edx,-0x34(%ebp)
+		mul    %esi
+		cmp    %edx,-0x34(%ebp)
+		jb     .L41a5
+		je     .L419d
+.L4f6:		mov    -0x34(%ebp),%ecx
+		sub    %eax,%edi
+		sbb    %edx,%ecx
+		mov    %ecx,-0x34(%ebp)
+		mov    %ecx,%edx
+		movzbl -0x1c(%ebp),%ecx
+		mov    %edi,%eax
+		shl    %cl,%edx
+		movzbl -0x24(%ebp),%ecx
+		shr    %cl,%eax
+		or     %eax,%edx
+		mov    -0x34(%ebp),%eax
+		mov    %edx,-0x30(%ebp)
+		shr    %cl,%eax
+		mov    %eax,-0x2c(%ebp)
+		mov    -0x30(%ebp),%eax
+		mov    -0x2c(%ebp),%edx
+		add    $0x30,%esp
+		pop    %esi
+		pop    %edi
+		pop    %ebp
+		ret
+.L4130:		mov    -0x14(%ebp),%esi
+		test   %esi,%esi
+		je     .L4150
+.L4137:		mov    -0x20(%ebp),%eax
+		mov    -0x18(%ebp),%edx
+		div    %ecx
+		mov    -0x10(%ebp),%eax
+		div    %ecx
+		jmp    .L442
+.L4150:		mov    $0x1,%eax
+		xor    %edx,%edx
+		divl   -0x14(%ebp)
+		mov    %eax,%ecx
+		jmp    .L4137
+		mov    %esi,%esi
+.L4160:		mov    -0x20(%ebp),%eax
+		cmp    %eax,-0x18(%ebp)
+		jb     .L4189
+		mov    -0x10(%ebp),%edx
+		cmp    %edx,-0x14(%ebp)
+		jbe    .L4189
+.L4170:		mov    -0x10(%ebp),%edx
+		mov    -0x20(%ebp),%ecx
+		mov    %edx,-0x30(%ebp)
+		mov    %ecx,-0x2c(%ebp)
+		mov    -0x30(%ebp),%eax
+		mov    -0x2c(%ebp),%edx
+		add    $0x30,%esp
+		pop    %esi
+		pop    %edi
+		pop    %ebp
+		ret
+.L4189:		mov    -0x20(%ebp),%ecx
+		mov    -0x10(%ebp),%eax
+		sub    -0x14(%ebp),%eax
+		sbb    -0x18(%ebp),%ecx
+		mov    %eax,-0x10(%ebp)
+		mov    %ecx,-0x20(%ebp)
+		jmp    .L4170
+.L419d:		cmp    %eax,%edi
+		jae    .L4f6
+.L41a5:		sub    %esi,%eax
+		sbb    -0xc(%ebp),%edx
+		jmp    .L4f6
 
 /* --- BSS. */
 

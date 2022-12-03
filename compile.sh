@@ -25,19 +25,24 @@ ls -ld minilibc32.bin
 $NASM -O9 -f obj -o minilibc32.obj minilibc32.nasm
 # Compile write(2)+exit(2) version (for hello-world benchmark).
 $NASM -O9 -f obj -DFEATURES_WE -o minilibc32we.obj minilibc32.nasm
+# Compile full version including 64-bit integers.
+$NASM -O9 -f obj -DFEATURES_INT64 -o minilibc32f.obj minilibc32.nasm
 
 # Compile the libc for GCC Linux i386.
 $NASM -O9 -f elf -o minilibc32.o minilibc32.nasm
 # Compile write(2)+exit(2) version (for hello-world benchmark).
 $NASM -O9 -f elf -DFEATURES_WE -o minilibc32we.o minilibc32.nasm
+# Compile full version including 64-bit integers.
+$NASM -O9 -f elf -DFEATURES_INT64 -o minilibc32f.o minilibc32.nasm
 
 # Compile the minilibc32.s fork with GNU as.
 AS="$($GCC -print-prog-name=as)"
 test "$AS"
 "$AS" -32 -march=i386 -o minilibc32a.o minilibc32.s
 
-# Compile program test1ow with OpenWatcom (owcc).
+# Compile programs test?ow with OpenWatcom (owcc).
 owcc -blinux -fnostdlib -Os -s -fno-stack-check -march=i386 -W -Wall -Wextra -Werror -o test1ow test1.c minilibc32.obj
+owcc -blinux -fnostdlib -Os -s -fno-stack-check -march=i386 -W -Wall -Wextra -Werror -o test2ow test2.c minilibc32f.obj
 
 # Compile program test1gc with GCC (gcc).
 #
@@ -46,12 +51,16 @@ owcc -blinux -fnostdlib -Os -s -fno-stack-check -march=i386 -W -Wall -Wextra -We
 #
 # GCC -m... and -f... flags are from
 # https://github.com/pts/pts-xtiny/blob/778a3353bd7313a9c0ec72a599b0a11ce72abbf6/xtiny#L819-L862
-$GCC -c -m32 -mregparm=3 -fno-pic -fno-stack-protector -fomit-frame-pointer -fno-ident -ffreestanding -fno-builtin -fno-unwind-tables -fno-asynchronous-unwind-tables -nostdlib -nostdinc -Os -falign-functions=1 -mpreferred-stack-boundary=2 -falign-jumps=1 -falign-loops=1 -march=i386 -ansi -pedantic -W -Wall -Werror=implicit-function-declaration -o test1gc.o test1.c
+GCCFLAGS='-m32 -mregparm=3 -fno-pic -fno-stack-protector -fomit-frame-pointer -fno-ident -ffreestanding -fno-builtin -fno-unwind-tables -fno-asynchronous-unwind-tables -nostdlib -nostdinc -Os -falign-functions=1 -mpreferred-stack-boundary=2 -falign-jumps=1 -falign-loops=1 -march=i386'
+$GCC -c $GCCFLAGS -ansi -pedantic -W -Wall -Werror=implicit-function-declaration -o test1gc.o test1.c
+$GCC -c $GCCFLAGS -ansi -pedantic -W -Wall -Werror=implicit-function-declaration -Wno-long-long -o test2gc.o test2.c
 # Do the linking separately, because gcc passes too many harmful flags to
 # `ld' (especially without the recent `gcc -fno-use-linker-plugin').
 LD="$($GCC -print-prog-name=ld)"
 test "$LD"
 "$LD" -m elf_i386 -o test1gc test1gc.o minilibc32.o
+"$LD" -m elf_i386 -o test2gc test2gc.o minilibc32f.o
+"$LD" -m elf_i386 -o test2gca test2gc.o minilibc32a.o
 
 # Compile program test_hello.ow with OpenWatcom (owcc).
 owcc -blinux -fnostdlib -o test_hello.ow -Os -s -fno-stack-check -march=i386 -W -Wall -Wextra -Werror test_hello.c minilibc32we.obj && $SSTRIP test_hello.ow

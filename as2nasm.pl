@@ -860,8 +860,10 @@ sub wasm2nasm($$$$$) {
     } elsif (m@^end(?: ([^\s:\[\],+\-*/]+))?$@i) {
       $end_expr = $1;
       $is_end = 1;
-    } elsif (m@^public ([^\s:\[\],+\-*/]+)?$@i) {
+    } elsif (m@^public ([^\s:\[\],+\-*/]+)$@i) {
       print $outfh "global \$$1\n";
+    } elsif (m@^extrn ([^\s:\[\],+\-*/]+)(?::byte)?$@i) {
+      print $outfh "extern \$$1\n";
     } elsif (!length($_) or m@^DGROUP GROUP@ or m@^ASSUME @) {  # Ignore.
     } else {
       die "fatal: unsupported WASM instruction ($lc): $_\n" ;

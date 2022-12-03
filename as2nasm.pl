@@ -798,6 +798,7 @@ sub wasm2nasm($$$$$) {
       die "$0: unsupported instruction in non-.text ($lc): $_\n" if $section ne ".text";
       die "$0: unsupported quote in instruction ($lc): $_\n" if m@'@;  # Whitespace is already gone.
       if (s~^(jmp|call) near ptr (?:FLAT:)?~$1 \$~) {
+      } elsif (s@^(j[a-z]+|loop[a-z]*) ([^\[\],\s]*)$@$1 \$$2@) {   # Add $ in front of jump target label.
       } else {
         s@, *@, @g;
         s@ (byte|word|dword) ptr (?:([^\[\],\s]*)\[(.*?)\]|FLAT:([^,]+))@

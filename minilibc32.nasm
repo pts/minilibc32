@@ -1062,25 +1062,28 @@ $__I8D:
 		ret
 
 ; For OpenWatcom.
+;
+; Divide (unsigned) EDX:EAX by ECX:EBX, store the result in EDX:EAX and the modulo in ECX:EBX.
+; Keep other registers (except for EFLAGS) intact.
 global $__U8D  ; No SYM(...), the OpenWatcom C compiler calls it like this.
 $__U8D:
 		or ecx, ecx
-		jne .6
+		jnz .6			; Is ECX nonzero (divisor is >32 bits)? If yes, then do it the slow and complicated way.
 		dec ebx
-		je .5
+		jz .5			; Is the divisor 1? Then just return the dividend as the result in EDX:EAX, and return 0 as the module on ECX:EBX.
 		inc ebx
 		cmp ebx, edx
-		ja .4
+		ja .4			; Is the high half of the dividend (EDX) smaller than the divisor (EBX)? If yes, then the high half of the result (EDX) will be zero, and just do a 64bit/32bit == 32bit division (single `div' instruction at .4).
 		mov ecx, eax
 		mov eax, edx
 		sub edx, edx
 		div ebx
 		xchg eax, ecx
-.4:		div ebx
-		mov ebx, edx
-		mov edx, ecx
-		sub ecx, ecx
-.5:		ret
+.4:		div ebx			; Store the result in EAX and the modulo in EDX.
+		mov ebx, edx		; Save the low half of the modulo to its final location (EBX).
+		mov edx, ecx		; Set the high half of the result (either to 0 or based on the `div' above).
+		sub ecx, ecx		; Set the high half of the modulo to 0 (because the divisor is 32-bit).
+.5:		ret			; Early return in the divisor is fits to 32 bits.
 .6:		cmp ecx, edx
 		jb .8
 		jne .7

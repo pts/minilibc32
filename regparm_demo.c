@@ -25,7 +25,15 @@ __attribute__((regparm(3))) int func5(int a1, int a2, int a3, int a4, int a5) {
   return a1 + (a2 ^ 2) + (a3 ^ 3) + (a4 ^ 4) + (a5 ^ 5);
 }
 
-void regsave(void) {
+__attribute__((regparm(3))) void regsave_rp3(void) {
+  /* Fake assembly code that ruins all the registers. */
+  /* EAX, ECX and EDX are scratch registers for the called functions.
+   * gcc generates code to push/pop EBX, EDI, ESI and EBP.
+   */
+  __asm__ __volatile__ ("" : : : "eax", "ebx", "ecx", "edi", "esi", "edi", "ebp", "memory");
+}
+
+__attribute__((regparm(0))) void regsave_rp0(void) {
   /* Fake assembly code that ruins all the registers. */
   /* EAX, ECX and EDX are scratch registers for the called functions.
    * gcc generates code to push/pop EBX, EDI, ESI and EBP.

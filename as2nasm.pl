@@ -857,7 +857,7 @@ sub wasm2nasm($$$$$$) {
       if ($rodata_strs and $segment eq "CONST") {
         push @$rodata_strs, "\$$_";
       } else {
-        print $outfh "_start:\n" if $_ eq "_start_:";  # Add extra start label for entry point.
+        print $outfh "_start:\n" if $_ eq "_start_:" or $_ eq "_mainCRTStartup:";  # Add extra start label for entry point.
         print $outfh "\$$_\n";
       }
     } elsif (s@^(d[bwd])(?= )@@i) {

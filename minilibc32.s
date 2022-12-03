@@ -181,6 +181,30 @@ lseek__RP3__:
 		push $19
 		jmp __do_syscall3
 
+.globl chdir__RP3__
+.type  chdir__RP3__, @function
+chdir__RP3__:
+		push $12
+		jmp __do_syscall3
+
+.globl mkdir__RP3__
+.type  mkdir__RP3__, @function
+mkdir__RP3__:
+		push $39
+		jmp __do_syscall3
+
+.globl rmdir__RP3__
+.type  rmdir__RP3__, @function
+rmdir__RP3__:
+		push $40
+		jmp __do_syscall3
+
+.globl getpid__RP3__
+.type  getpid__RP3__, @function
+getpid__RP3__:
+		push $20
+		jmp __do_syscall3
+
 .globl write__RP3__
 .type  write__RP3__, @function
 write__RP3__:

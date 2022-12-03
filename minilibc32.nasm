@@ -220,6 +220,27 @@ SYM($lseek):
 		push byte 19		; __NR_lseek.
 		jmp short __do_syscall3
 
+
+global SYM($chdir)
+SYM($chdir):
+		push byte 12		; __NR_chdir.
+		jmp short __do_syscall3
+
+global SYM($mkdir)
+SYM($mkdir):
+		push byte 39		; __NR_mkdir.
+		jmp short __do_syscall3
+
+global SYM($rmdir)
+SYM($rmdir):
+		push byte 40		; __NR_rmdir.
+		jmp short __do_syscall3
+
+global SYM($getpid)
+SYM($getpid):
+		push byte 20		; __NR_getpid.
+		jmp short __do_syscall3
+
 %endif  ; ifndef FEATURES_WE
 
 global SYM($write)

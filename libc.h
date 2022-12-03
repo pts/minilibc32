@@ -61,6 +61,7 @@ typedef unsigned size_t;
 typedef int ssize_t;
 typedef unsigned mode_t;
 typedef long off_t;  /* Not implemented: 64-bit off_t (#define _FILE_OFFSET_BITS 64), off64_r, lseek64(2). */
+typedef int pid_t;
 
 /* --- <stdarg.h> */
 
@@ -107,6 +108,12 @@ extern off_t __LIBC_FUNC(lseek, (int fd, off_t offset, int whence));
 extern int __LIBC_FUNC(unlink, (const char *pathname));
 extern int __LIBC_FUNC(remove, (const char *pathname));  /* Same as unlink(...). */
 extern int __LIBC_FUNC(rename, (const char *oldpath, const char *newpath));
+/**/
+extern int __LIBC_FUNC(chdir, (const char *pathname));
+extern int __LIBC_FUNC(mkdir, (const char *pathname, mode_t mode));
+extern int __LIBC_FUNC(rmdir, (const char *pathname));
+/**/
+extern pid_t __LIBC_FUNC(getpid, (void));
 
 #endif  /* If __LIBC_OK */
 #endif  /* Ifndef _LIBC_H */

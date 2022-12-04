@@ -336,8 +336,8 @@ my %reg32_to_index = ('eax' => 0, 'ecx' => 1, 'edx' => 2, 'ebx' => 3, 'esp' => 4
 
 my %as_string_escape1 = ("b" => "\x08", "f" => "\x0c", "n" => "\x0a", "r" => "\x0d", "t" => "\x09", "v" => "\x0b");
 
-sub fix_label($$$$) {
-  my($label, $bad_labels, $used_labels, $local_labels) = @_;
+sub fix_label($$$$;$) {
+  my($label, $bad_labels, $used_labels, $local_labels, $skip_mark_as_used) = @_;
   if ($label =~ m@\A[.]L(\w+)\Z(?!\n)@) {  # Typically: .L1 and .LC0
     $label = "L_$1";
   } elsif ($label =~ m@\A__imp__[a-zA-Z_\@?][\w.\@?\$~#]*\Z(?!\n)@) {  # DLL import function pointer. Must always be global.
@@ -349,7 +349,7 @@ sub fix_label($$$$) {
     push @$bad_labels, $label;
     return "?";
   }
-  $used_labels->{$label} = 1;
+  $used_labels->{$label} = 1 if !$skip_mark_as_used;
   $label
 }
 
@@ -484,7 +484,7 @@ sub as2nasm($$$$$$$$$) {
         # extern functions. So in the NASM output we end up with both
         # `global __udivdi3' and `extern __udivdi3'. That's fine, even for
         # `nasm -f elf'.
-        my $label = fix_label($1, \@bad_labels, $used_labels, \%local_labels);
+        my $label = fix_label($1, \@bad_labels, $used_labels, \%local_labels, 1);
         print $outfh "global $label\n";
         print $outfh "global _start\n" if $label eq "F__start" or $label eq "F__mainCRTStartup";  # !! TODO(pts): Indicate the entry point smarter.
         if (exists($defined_labels{$label})) {
@@ -501,7 +501,7 @@ sub as2nasm($$$$$$$$$) {
           $global_labels{$label} = 1;
         }
       } elsif (m@\A[.]local ([^\s:,]+)\Z@) {
-        my $label = fix_label($1, \@bad_labels, $used_labels, \%local_labels);
+        my $label = fix_label($1, \@bad_labels, $used_labels, \%local_labels, 1);
         if (exists($defined_labels{$label})) {
           ++$errc;
           print STDERR "error: label defined before .local ($lc): $label\n";
@@ -558,7 +558,7 @@ sub as2nasm($$$$$$$$$) {
         # !! respect it.
         $section = "";
       } elsif (m@\A[.]extern ([^\s:,]+)\Z@) {  # GCC doesn't write these.
-        my $label = fix_label($1, \@bad_labels, $used_labels, \%local_labels);
+        my $label = fix_label($1, \@bad_labels, $used_labels, \%local_labels, 1);
         if ($label =~ m@\AL_@) {
           ++$errc;
           print STDERR "error: local-prefix label cannot be declared .extern ($lc): $label\n";
@@ -587,7 +587,7 @@ sub as2nasm($$$$$$$$$) {
             print STDERR "warning: alignment value larger than 4 capped to 4 ($lc): $_\n" if $alignment > 4;
             $alignment = 4;
           }
-          my $label = fix_label($1, \@bad_labels, $used_labels, \%local_labels);
+          my $label = fix_label($1, \@bad_labels, $used_labels, \%local_labels, 1);
           $defined_labels{$label} = 1;
           my $value = "$size:$alignment";
           if (!exists($common_by_label->{$label})) {

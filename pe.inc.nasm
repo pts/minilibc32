@@ -1,25 +1,29 @@
 ;
-; smallpe.inc.nasm: small (548 bytes), flexible and ultraportable Win32 PE .exe
-; by pts@fazekas.hu on 2020-07-25
+; pe.inc.nasm: small, flexible and ultraportable Win32 PE .exe in C and assembly
+; by pts@fazekas.hu on Sun Dec  4 04:32:02 CET 2022
 ;
-; Compile: nasm -O0 -f bin -o prog.exe prog.nasm
+; Based on
+; https://github.com/pts/pts-tinype/blob/4a2516c368e22bea85d56fd2b5b91140cd3622eb/smallpe.inc.nasm
 ;
 ; Runtime compatibility: The generated .exe works on Windows NT 3.1--Windows
 ; 10, tested on Windows NT 3.1, Windows 95, Windows XP, Windows 7, Windows 10
 ; and Wine 5.0.
 ;
+; Compile: nasm -O9 -f bin -o prog.exe prog.nasm
+;
 ; Example prog.exe (548 bytes) which just exits successfully:
 ;
-;   %include "smallpe.inc.nasm"
+;   %include "pe.inc.nasm"
+;   _pe_start 32, 4|sect_many|console
 ;   _start:
-;   endpe  ; A call to ExitProcess (with EXIT_SUCCESS == 0) is auto-added.
+;   push strict byte 0  ; EXIT_SUCCESS.
+;   kcall ExitProcess  ; In KERNEL32.DLL.
+;   _end
 ;
-; It's hard to write any shorter code after _start, because the program
-; should exit cleanly.
+; Example prog.exe (584 bytes which prints hello-world and exits:
 ;
-; Example prog.exe which prints hello-world and exits:
-;
-;   %include "smallpe.inc.nasm"
+;   %include "pe.inc.nasm"
+;   _pe_start 32, 1|console
 ;   _start:
 ;   push strict byte -11  ; STD_OUTPUT_HANDLE.
 ;   kcall GetStdHandle  ; Calls function in KERNEL32.DLL.
@@ -32,12 +36,13 @@
 ;   push strict dword message  ; Argument 2: message.
 ;   push eax  ; if it was saved, strict dword [esp+20]  ; Argument 1: Stdout handle.
 ;   kcall WriteFile
-;   ; A call to ExitProcess (with EXIT_SUCCESS == 0) is auto-added.
-;   section rodata  ; Optional, but makes the .exe output smaller.
+;   push strict byte 0  ; EXIT_SUCCESS.
+;   kcall ExitProcess
+;   section hdrdata  ; Optional, but makes the .exe output smaller.
 ;   message:
 ;   db 'Hello, World!', 13, 10
 ;   message_end:
-;   endpe
+;   _end
 ;
 ; Minimum version of NASM needed: 0.98.39 (2005-01-20).
 ;
@@ -46,15 +51,29 @@
 ; directly. If you need them, load them with `kcall LoadLibraryA', and then
 ; get address of a function with `kcall GetProcAddress'.
 ;
-; If `section rodata' (which includes the function names in all kcalls) is
+; If `section hdrdata' (which includes the function names in all kcalls) is
 ; short, then your code will start at offset 512 in the .exe file, you can
 ; disassemble it with:
 ;
 ;   $ ndisasm -b 32 -e 0x200 -o 0x1000 prog.exe
 ;
+; !! implement sect_many flag (real .data and .rodata) -- does Windows NT implement .rodata separately from .data? What does MinGW GCC generate?
+; !! implement console flag
+; !! implement data_alignment
+; !! create relocations
+;
 
+; Example: _pe_start 32, 4|sect_many|console
+%macro _pe_start 2
+%ifnidn %1,32
+%error Only 32-bit Win32 PE executables are supported.
+times -1 nop  ; Force error on NASM 0.98.39.
+%endif
+; !! Implement alignment and flags in %2
 bits 32
+%ifndef _PE_PROG_CPU_UNCHANGED  ; Defined externally before _pe_start is called.
 cpu 386
+%endif
 
 ; The user can %define these to override the defaults.
 %ifdef  __IMAGE_BASE__
@@ -79,17 +98,17 @@ section stubx    align=1 valign=1 follows=stub vfollows=stub  ; Extra stub bytes
 _STUBX:
 section peheader align=1 valign=1 follows=stubx vfollows=stubx  ; Starts with the PE header, ends with names. The user shouldn't add anything here.
 _PEHEADER:
-section rodata   align=1 valign=1 follows=peheader vfollows=peheader  ; The user can populate it with read-only (no write, no execute) data. May overflow to text, restrictions may not be enforced.
+section hdrdata  align=1 valign=1 follows=peheader vfollows=peheader  ; The user can populate it with read-only (no write, no execute) data. May overflow to .text, restrictions may not be enforced.
 _RODATA:
-section text     align=1 valign=1 follows=rodata vstart=__PLEASE_CALL_endpe__  ; The user should populate it with code or data (read, write, execute).
+section .text    align=1 valign=1 follows=hdrdata vstart=__PLEASE_CALL__end__  ; The user should populate it with code or data (read, write, execute).
 _TEXT:
-section iat      align=1 valign=1 follows=text vfollows=text  ; Contains the import address table. The user shouldn't add anthing here.
+section iat      align=1 valign=1 follows=.text vfollows=.text  ; Contains the import address table. The user shouldn't add anthing here.
 _IAT:
-section import   align=1 valign=1 follows=iat vfollows=iat  ; Contains the import descriptor. Must be directly in front of bss. The user shouldn't add anthing here.
+section import   align=1 valign=1 follows=iat vfollows=iat  ; Contains the import descriptor. Must be directly in front of .bss. The user shouldn't add anthing here.
 _IMPORT:
-section bss      align=1 follows=import nobits  ; The user can populate it with uninitialized data (e.g. with resb).
+section .bss     align=1 follows=import nobits  ; The user can populate it with uninitialized data (e.g. with resb).
 _BSS:
-section endpe    align=1 follows=bss nobits  ; Sentinel section, the user must leave it empty.
+section endpe    align=1 follows=.bss nobits  ; Sentinel section, the user must leave it empty.
 
 section peheader
 
@@ -99,7 +118,7 @@ db 'PE', 0, 0
 IMAGE_FILE_HEADER:
 Machine: dw 0x14c  ; IMAGE_FILE_MACHINE_I386
 NumberOfSections: dw (IMAGE_SECTION_HEADER_end-IMAGE_SECTION_HEADER)/40
-TimeDateStamp: dd 0+0*__PLEASE_CALL_endpe__
+TimeDateStamp: dd 0+0*__PLEASE_CALL__end__
 PointerToSymbolTable: dd 0
 NumberOfSymbols: dd 0
 SizeOfOptionalHeader: dw IMAGE_OPTIONAL_HEADER32_end-IMAGE_OPTIONAL_HEADER32
@@ -233,6 +252,28 @@ section iat
 ; Because of the modification, this mustn't start earlier than __RVA_TEXT__
 IMPORT_ADDRESS_TABLE:  ; Import address table. Modified by the PE loader before jumping to __ENTRY__POINT__.
 
+section .text
+%define section __pe_section
+%endm  ; _pe_start
+
+; Example: __pe_section .text
+%macro __pe_section 1
+%undef section
+%ifidn %1,.text
+section .text
+%elifidn %1,.rodata
+section .text  ; !! Implement .rodata.
+%elifidn %1,.data
+section .text  ; !! Implement .data.
+%elifidn %1,.bss
+section .bss
+%else
+%error Unsupported Win32 PE _section: %1
+times -1 nop
+%endif
+%define section __pe_section
+%endm
+
 ; Calls the named function in KERNEL32.DLL.
 ;
 ; NASM doesn't verify at compile time whether the function exists in
@@ -251,6 +292,7 @@ IMPORT_ADDRESS_TABLE:  ; Import address table. Modified by the PE loader before 
 ;   for the same library function (%2), then the same function name name (%2)
 ;   will be emitted multiple times to your .exe.
 %macro kcall 2
+%undef section
 ; We could use `%iftoken %1' in NASM >= 2.02. We don't bother.
 %ifstr %2  ; SUXX: It's also true for 'foo'+4.
 %ifndef %1  ; Extend the import and name sections only once.
@@ -267,7 +309,9 @@ __SECT__  ; Back to the previous section when the macro was called.
 call [%1]
 %else
 %error 'Argument 2 of kcall must be a a quoted string.'
+times -1 nop  ; Force error on NASM 0.98.39.
 %endif
+%define section __pe_section
 %endmacro
 
 ; Helper macro deftok_compat (to be used in kcall/1).
@@ -413,6 +457,7 @@ call [%1]
 %xdefine %1 %1 %+ _
 %else
 %error invalid deftok character: %$c
+times -1 nop  ; Force error on NASM 0.98.39.
 %endif
 %endrep
 %endmacro
@@ -457,10 +502,12 @@ deftok_compat %$n, __imp__, %1
 %xdefine __KCALL2__ kcall %$n, %1
 %else
 %error 'Argument of kcall must be string or identifier.'
+times -1 nop  ; Force error on NASM 0.98.39.
 %define __KCALL2__ call dword [0]
 %endif  ; %ifid/%elifstr %1
 %else
 %error 'Argument of kcall must be a single token.'
+times -1 nop  ; Force error on NASM 0.98.39.
 %define __KCALL2__ call dword [0]
 %endif  ; %iftoken %1
 %pop
@@ -564,11 +611,12 @@ __KCALL2__
 %macro kcall 1
 %push kcall
 %undef __KCALL2__
-%ifid %1
+%ifid %1  ; !! What if %1 is foo+2 ? We don't want to match that Defining a macro may help with `foo 2'.
 %ifdef __str__%1
 %define __KCALL2__ kcall __imp__%1, __str__%1
 %else
 %error 'In NASM <2.03, add quotes around argument of kcall.'
+times -1 nop  ; Force error on NASM 0.98.39.
 %define __KCALL2__ call dword [0]
 %endif
 %elifstr %1
@@ -576,6 +624,7 @@ deftok_compat %$n, __imp__, %1
 %xdefine __KCALL__ kcall %$n,
 %else
 %error 'Argument of kcall must be string or identifier.'
+times -1 nop  ; Force error on NASM 0.98.39.
 %define __KCALL2__ call dword [0]
 %endif
 %pop
@@ -605,37 +654,36 @@ push %1
 kcall ExitProcess
 %endmacro
 
-; Helper macro (to be used in endpe/1).
-%macro __AFTER_ENDPE__ 0+
-  %error 'Please move all code and data above endpe.'
+; Helper macro (to be used in _end/1).
+%macro __AFTER__END__ 0+
+  %error 'Please move all code and data above _end.'
+  times -1 nop  ; Force error on NASM 0.98.39.
 %endmacro
 
 ; You must call this at the end of your .nasm source file.
 ;
-; Usage: endpe  ; Default entry point is at label _start.
-; Usage: endpe _mystart  ; Entry point label.
+; Usage: _end  ; Default entry point is at label _start.
+; Usage: _end _mystart  ; Entry point label.
 ;
 ; If you forget to call it at the end, NASM will report this error:
-;    error: symbol `__PLEASE_CALL_endpe__' undefined
-;    error: symbol `__PLEASE_CALL_endpe__' not defined before use
-%macro endpe 0
+;    error: symbol `__PLEASE_CALL__end__' undefined
+;    error: symbol `__PLEASE_CALL__end__' not defined before use
+%macro _end 0
   %ifdef __ENTRY_POINT__
-  endpe __ENTRY_POINT__
+  _end __ENTRY_POINT__
   %else
-  endpe _start
+  _end _start
   %endif
 %endmacro
-%macro endpe 1  ; Argument: _start address.
-  %ifdef __PLEASE_CALL_endpe__
-  %error 'endpe called twice'
+%macro _end 1  ; Argument: _start address.
+  %ifdef __PLEASE_CALL__end__
+  %error '_end called twice'
+  times -1 nop  ; Force error on NASM 0.98.39.
   %else
-  %define __PLEASE_CALL_endpe__ __PLEASE_CALL_endpe__
+  %define __PLEASE_CALL__end__ __PLEASE_CALL__end__
   %endif
+  %undef section  ; Revert from __pe_section to built-in.
   __ENTRY_POINT__ equ (%1)
-  section text
-  %ifndef __imp__ExitProcess
-  exit
-  %endif
   section stub
   %if $-$$==0
     ; 0x40-byte PE DOS stub, based on:
@@ -662,6 +710,7 @@ kcall ExitProcess
     IMAGE_DOS_HEADER_end:
     %if IMAGE_DOS_HEADER_end-IMAGE_DOS_HEADER>0x200
       %error 'Default IMAGE_DOS_HEADER too long.'
+      times -1 nop  ; Force error on NASM 0.98.39.
     %endif
   %endif
   _STUB_end:
@@ -672,14 +721,14 @@ kcall ExitProcess
   section peheader
   dd 0  ; Why is this needed? A dw is not enough.
   _PEHEADER_end:
-  section rodata
+  section hdrdata
   _RODATA_before_padding:
   __IMAGE_SIZE_UPTO_TEXT_UNPADDED__ equ (_STUB_end-_STUB)+(_STUBX_end-_STUBX)+(_PEHEADER_end-_PEHEADER)+($-_RODATA)
   %if __IMAGE_SIZE_UPTO_TEXT_UNPADDED__<0x200
   times 0x200-__IMAGE_SIZE_UPTO_TEXT_UNPADDED__ db 'H'
   %endif
   _RODATA_end:
-  section text
+  section .text
   _TEXT_end:
   section iat
   dd 0  ; Marks end-of-list.
@@ -687,9 +736,10 @@ kcall ExitProcess
   _IAT_end:
   section import
   %if $-_IMPORT_end!=0
-  %error 'Please do not add anything to section import.'  ; IMAGE_IMPORT_DESCRIPTORS_end has to precede section bss.
+  %error 'Please do not add anything to section import.'  ; IMAGE_IMPORT_DESCRIPTORS_end has to precede section .bss.
+  times -1 nop  ; Force error on NASM 0.98.39.
   %endif
-  section bss
+  section .bss
   %if $-_BSS<IMAGE_IMPORT_DESCRIPTORS_BSS_SIZE
   resb IMAGE_IMPORT_DESCRIPTORS_BSS_SIZE-($-_BSS)
   %endif
@@ -700,42 +750,41 @@ kcall ExitProcess
   __IMAGE_SIZE_UPTO_TEXT__ equ (_STUB_end-_STUB)+(_STUBX_end-_STUBX)+(_PEHEADER_end-_PEHEADER)+(_RODATA_end-_RODATA)
   __VSTART_TEXT__ equ __IMAGE_BASE__+0x1000+(__IMAGE_SIZE_UPTO_TEXT__&0x1ff)
   %else
-  ; TODO(pts): Make the header larger (and thus keep more of `section rodata' read-only).
+  ; TODO(pts): Make the header larger (and thus keep more of `section hdrdata' read-only).
   __IMAGE_SIZE_UPTO_TEXT__ equ 0x1000
   __VSTART_TEXT__ equ __IMAGE_BASE__+(_STUB_end-_STUB)+(_STUBX_end-_STUBX)+(_PEHEADER_end-_PEHEADER)+(_RODATA_end-_RODATA)
   %endif
-  __PLEASE_CALL_endpe__ equ __VSTART_TEXT__
+  __PLEASE_CALL__end__ equ __VSTART_TEXT__
   %if __RVA_TEXT__<__IMAGE_SIZE_UPTO_TEXT__  ; Assert, shouldn't happen.
   ; Wine 5.0 doesn't care, but Windows NT 3.1, Windows 95 and Windows XP do.
-  %error 'VirtualAddress of section text must be smaller than SizeOfHeader.'
+  %error 'VirtualAddress of section .text must not be smaller than SizeOfHeader.'
+  times -1 nop  ; Force error on NASM 0.98.39.
   %endif
   __IMAGE_SIZE_UPTO_BSS__ equ __VSTART_TEXT__-__IMAGE_BASE__+(_TEXT_end-_TEXT)+(_IAT_end-_IAT)+(_IMPORT_end-_IMPORT)
   __IMAGE_SIZE__ equ __IMAGE_SIZE_UPTO_BSS__+(_BSS_end-_BSS)
   section endpe  ; Keep it going, catch accidental assembly instructions after endpe.
   ; Will cause: warning: attempt to initialize memory in a nobits section: ignored [-w+other]
   %if $-$$!=0
-    __AFTER_ENDPE__
+    __AFTER__END__
   %endif
-  %idefine resb __AFTER_ENDPE__
-  %idefine resw __AFTER_ENDPE__
-  %idefine resd __AFTER_ENDPE__
-  %idefine resq __AFTER_ENDPE__
-  %idefine rest __AFTER_ENDPE__
-  %idefine reso __AFTER_ENDPE__
-  %idefine resy __AFTER_ENDPE__
-  %idefine istruc __AFTER_ENDPE__
-  %idefine section __AFTER_ENDPE__
-  %idefine segment __AFTER_ENDPE__
-  %idefine db __AFTER_ENDPE__
-  %idefine dw __AFTER_ENDPE__
-  %idefine dd __AFTER_ENDPE__
-  %idefine dq __AFTER_ENDPE__
-  %idefine dt __AFTER_ENDPE__
-  %idefine do __AFTER_ENDPE__
-  %idefine dy __AFTER_ENDPE__
-  %idefine nop __AFTER_ENDPE__
+  %idefine resb __AFTER__END__
+  %idefine resw __AFTER__END__
+  %idefine resd __AFTER__END__
+  %idefine resq __AFTER__END__
+  %idefine rest __AFTER__END__
+  %idefine reso __AFTER__END__
+  %idefine resy __AFTER__END__
+  %idefine istruc __AFTER__END__
+  %idefine section __AFTER__END__
+  %idefine segment __AFTER__END__
+  %idefine db __AFTER__END__
+  %idefine dw __AFTER__END__
+  %idefine dd __AFTER__END__
+  %idefine dq __AFTER__END__
+  %idefine dt __AFTER__END__
+  %idefine do __AFTER__END__
+  %idefine dy __AFTER__END__
+  %idefine nop __AFTER__END__
 %endmacro
-
-section text
 
 ; __END__

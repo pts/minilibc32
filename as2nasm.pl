@@ -259,9 +259,9 @@ sub print_nasm_header($$$$$) {
   section .bss align=$data_alignment
   %macro _end 0
   %endm
-  %macro kcall 1-2
+  %macro kcall 2
   extern %1  ; Example %1: __imp__WriteFile\@20
-  call dword [%1]
+  call [%1]
   %endm
 %else
   %include '${mydirp}pe.inc.nasm'  ; To make `nasm -f bin' produce a Win32 executable program.
@@ -278,8 +278,9 @@ sub print_nasm_header($$$$$) {
   section .bss align=$data_alignment
   %macro _end 0
   %endm
-  %macro kcall 1
-  call [__imp__%1]
+  %macro kcall 2
+  extern %1  ; Example %1: __imp__WriteFile\@20
+  call [%1]
   %endm
 %else
   %include '${mydirp}elf.inc.nasm'  ; To make `nasm -f bin' produce an ELF executable program.
@@ -336,6 +337,8 @@ sub fix_label($$$$) {
   my($label, $bad_labels, $used_labels, $local_labels) = @_;
   if ($label =~ m@\A[.]L(\w+)\Z(?!\n)@) {  # Typically: .L1 and .LC0
     $label = "L_$1";
+  } elsif ($label =~ m@\A__imp__[a-zA-Z_\@?][\w.\@?\$~#]*\Z(?!\n)@) {  # DLL import function pointer. Must always be global.
+    # Keep it.
   } elsif ($label =~ m@\A([a-zA-Z_\@?][\w.\@?\$~#]*)\Z(?!\n)@) {  # Match NASM label.
     my $label2 = "S_$1";
     $label = exists($local_labels->{$label2}) ? $label2 : "F_$1";
@@ -382,8 +385,8 @@ sub fix_reg($) {
 # hand-written .as files also work.
 #
 # !! Rename local labels (L_* and also non-.globl F_) by file: L1_* F2_*.
-sub as2nasm($$$$$$$$) {
-  my($srcfh, $outfh, $first_line, $lc, $rodata_strs, $undefineds, $define_when_defined, $common_by_label) = @_;
+sub as2nasm($$$$$$$$$) {
+  my($srcfh, $outfh, $first_line, $lc, $rodata_strs, $is_win32, $undefineds, $define_when_defined, $common_by_label) = @_;
   my %unknown_directives;
   my $errc = 0;
   my $is_comment = 0;
@@ -496,7 +499,10 @@ sub as2nasm($$$$$$$$) {
         if ($label =~ m@\AL_@) {
           ++$errc;
           print STDERR "error: local-prefix label cannot be declared .local ($lc): $label\n";
-        } elsif (exists($global_labels{$label})) {  # Must start with F_.
+        } elsif ($label =~ m@\A__imp__@) {
+          ++$errc;
+          print STDERR "error: __imp__-prefix label cannot be declared .local ($lc): $label\n";
+        } elsif (exists($global_labels{$label})) {  # Must start with F_ or __imp__.
           ++$errc;
           print STDERR "error: label already .global before .local ($lc): $label\n";
         } elsif (exists($externs{$label})) {
@@ -718,10 +724,13 @@ sub as2nasm($$$$$$$$) {
       my $is_args_special = exists($special_arg_insts{$inst});
       substr($inst, 0, 1) = "" if ($inst eq "lcall" or $inst eq "ljmp");
       if  ($inst =~ m@\A(?:call\Z|j[a-z]{1,3}|loop)@) {  # Includes jmp.
-        if (s@\A[*]@@) {}
-        elsif (!m@\A[\$]@) { s@\A@\$@ }  # Relative immediate syntax for `jmp short' or `jmp near'.
+        if (s@\A[*]@@) {
+           if ($is_win32 and $inst eq "call" and m@\A__imp__([^\s:\[\],+\-*/()<>`]+?)((?:\@\d+)?)\Z@) {
+             print $outfh "\t\tkcall __imp__$1$2, '$1'\n";  # Example: kcall __imp__GetStdHandle@4, 'GetStdHandle'
+             next;
+           }
+        } elsif (!m@\A[\$]@) { s@\A@\$@ }  # Relative immediate syntax for `jmp short' or `jmp near'.
       }
-      #
       pos($_) = 0;
       my @args;
       my $tmp_arg;
@@ -872,7 +881,6 @@ sub wasm2nasm($$$$$$) {
       } elsif (s@^(j[a-z]+|loop[a-z]*) ([^\[\],\s]+)$@$1 \$$2@) {   # Add $ in front of jump target label.
         s@\$`([^\s:\[\],+\-*/()<>`]+)`@\$$1@g;  # Remove backtick quotes. Usually they are not present here.
       } elsif ($is_win32 and m@^call dword ptr *(?:FLAT:)?`?__imp__([^\s:\[\],+\-*/()<>`]+?)((?:\@\d+)?)`?$@) {
-        my $label = $1;
         $_ = "kcall __imp__$1$2, '$1'";  # Example: kcall __imp__GetStdHandle@4, 'GetStdHandle'
       } else {
         s`([\s,])(byte|word|dword) ptr (?:([^\[\],\s]*)\[(.*?)\]|FLAT:([^,]+))`
@@ -1144,7 +1152,7 @@ print_nasm_header($nasmfh, $cpulevel, $data_alignment, $is_win32, $mydirp);
 if ($srcfmt eq "as") {
   print STDERR "info: converting from GNU as to NASM syntax: $srcfn to $nasmfn\n";
   my $undefineds = {};
-  $errc += as2nasm($srcfh, $nasmfh, $first_line, $lc, $rodata_strs, $undefineds, $define_when_defined, $common_by_label);
+  $errc += as2nasm($srcfh, $nasmfh, $first_line, $lc, $rodata_strs, $is_win32, $undefineds, $define_when_defined, $common_by_label);
   print $nasmfh "\nsection .rodata\n" if $rodata_strs and @$rodata_strs;
   print_merged_strings_in_strdata($nasmfh, $rodata_strs, 1);
   if (%$undefineds) {

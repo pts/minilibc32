@@ -292,6 +292,8 @@ sub print_nasm_header($$$$$) {
   #print $outfh "\nsection .text\n";  # asm2nasm(...) will print int.
 }
 
+my %gp_regs = map { $_ => 1 } qw(al cl dl bl ah ch dh bh ax cx dx bx sp bp si di eax ecx edx ebx esp ebp esi edi);
+
 # --- Convert from GNU as (AT&T) syntax to NASM.
 
 # !! Was fuzz2.pl complete? Why not jb, jl, cmpxchg8b, fcmovl, prefetchw?
@@ -325,8 +327,6 @@ my %special_arg_insts = (map { $_ => 1 } qw(bound enter lcall ljmp in out nop
     keys(%str_arg_insts), keys(%shift_insts));
 
 my %reg32_to_index = ('eax' => 0, 'ecx' => 1, 'edx' => 2, 'ebx' => 3, 'esp' => 4, 'ebp' => 5, 'esi' => 6, 'edi' => 7);
-
-my %gp_regs = map { $_ => 1 } qw(al cl dl bl ah ch dh bh ax cx dx bx sp bp si di eax ecx edx ebx esp ebp esi edi);
 
 my %as_string_escape1 = ("b" => "\x08", "f" => "\x0c", "n" => "\x0a", "r" => "\x0d", "t" => "\x09", "v" => "\x0b");
 
@@ -818,6 +818,7 @@ sub wasm2nasm($$$$$$) {
       s@;.*@@s;
       s@\s+@ @g;
       s@ \Z(?!\n)@@;
+      s@\s*,\s*@, @g;
     }
     if ($is_instr) {
       die "$0: unsupported instruction in non-.text ($lc): $_\n" if $section ne ".text";
@@ -836,6 +837,16 @@ sub wasm2nasm($$$$$$) {
         s@([-+])FLAT:([^,]+)@$1\$$2@g;
         s@\boffset (?:FLAT:)?([^\s,+\-\[\]*/()<>]+)@ \$$1@g;
         s@\$`([^\s:\[\],+\-*/()<>`]+)`@\$$1@g;  # Remove backtick quotes in `call dword [$`__imp__GetStdHandle@4`]`.
+        if (m@^([a-z0-9]+) (?:byte|word|dword) ([^,]+)(, *(?:byte |word |dword )?([^,]+))?$@) {
+          if (exists($gp_regs{$2}) or (defined($4) and $1 ne "movsx" and $1 ne "movzx" and exists($gp_regs{$4}))) {
+            my $m3 = defined($3) ? $3 : "";
+            $_ = "$1 $2$m3";  # Omit the byte|word|dword qualifier.
+          }
+        } elsif (m@^([a-z0-9]+) ([^,]+), *(?:byte|word|dword) ([^,]+)?$@) {
+          if (exists($gp_regs{$3}) or ($1 ne "movsx" and $1 ne "movzx" and exists($gp_regs{$2}))) {
+            $_ = "$1 $2, $3";  # Omit the byte|word|dword qualifier.
+          }
+        }
       }
       if ($rodata_strs and $segment eq "CONST") {  # C string literals.
         push @$rodata_strs, $_;

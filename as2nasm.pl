@@ -393,6 +393,7 @@ sub as2nasm($$$$$$$$$) {
   my %unknown_directives;
   my $errc = 0;
   my $is_comment = 0;
+  my $do_omit_call_to___main = 0;
   my $section = ".text";
   my $used_labels = {};
   my %defined_labels;
@@ -429,6 +430,7 @@ sub as2nasm($$$$$$$$$) {
         # Example from MinGW: .def	_mainCRTStartup;	.scl	2;	.type	32;	.endef
         if (defined($2) and $2 eq "2") {
           $_ = "";  # Global or extern symbol $1, keep it.
+          $do_omit_call_to___main = 1 if $1 eq "___main";  # MinGW GCC 4.8.2.
         } else {
           $_ = ".type $1," if !defined($2) or $2 ne "2";  # Will make it implicitly local below.
         }
@@ -775,6 +777,8 @@ sub as2nasm($$$$$$$$$) {
              print $outfh "\t\tkcall __imp__$1$2, '$1'\n";  # Example: kcall __imp__GetStdHandle@4, 'GetStdHandle'
              next;
            }
+        } elsif ($do_omit_call_to___main and $inst eq "call" and $_ eq "___main") {
+          next;  # Just omit it, argc and argv re already fine.
         } elsif (!m@\A[\$]@) { s@\A@\$@ }  # Relative immediate syntax for `jmp short' or `jmp near'.
       }
       pos($_) = 0;

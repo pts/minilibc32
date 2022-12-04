@@ -411,10 +411,17 @@ sub as2nasm($$$$$$$$) {
     } else {
       s@\s+|("(?:[^\\"]+|\\.)*")@ defined($1) ? $1 : " " @ge;  # Keep quoted spaces intact.
     }
-    if (s@;.*@@s) {
-      ++$errc;
-      # TODO(pts): Support multiple instructions per line.
-      print STDERR "error: multiple instructions per line, all but the first ignored ($lc): $_\n";
+    if (m@;@) {
+      if (m@\A[.]def [^\s:,;]+ *; *[.]scl @) {
+        # Example from MinGW: .def	_mainCRTStartup;	.scl	2;	.type	32;	.endef
+        # Just ignore it.
+        $_ = "";
+      } else {
+        s@;.*@@s;
+        ++$errc;
+        # TODO(pts): Support multiple instructions per line.
+        print STDERR "error: multiple instructions per line, all but the first ignored ($lc): $_\n";
+      }
     }
     next if !length($_);
     my @bad_labels;

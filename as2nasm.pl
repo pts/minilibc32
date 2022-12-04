@@ -299,6 +299,97 @@ sub print_nasm_header($$$$$) {
   #print $outfh "\nsection .text\n";  # asm2nasm(...) will print int.
 }
 
+sub process_abitest($$$$) {
+  my($outfh, $name, $insts, $lc) = @_;
+  if ($name eq "retsum") {
+    # To check which -mregparm=0 ... -regparm=3 was used for compilation,
+    # irrespective of the GCC optimization level: If there is a `sub esp, sv'
+    # instruction, remember sv. Othervise let sv be 0. Count the number of
+    # [esp+...] (only displacements larger than sv) and [ebp+...] (only
+    # positive displacements) effective addresses in the function code: c. Then
+    # the regparm value is (3 - c).
+    #
+    # __attribute__((used)) static int __abitest_retsum(int a1, int a2, int a3) { return a1 + a2 + a3; }
+    my $addc = 0;
+    for my $inst (@$insts) {
+      ++$addc if $inst =~ m@\A\t*add (?!esp,)@;
+    }
+    if ($addc != 2) {
+      print STDERR "error: expected 2 adds in abitest $name ($lc): $name\n";
+      return 1;
+    }
+    my $c3 = 3;
+    my $sv = 0; my $ebxc = 0; my $ecxc = 0;
+    for my $inst (@$insts) {
+      if ($inst =~ m@\A\t*sub esp, (0+|[1-9]\d*|([^\[]]))$@) {  # TODO(pts): Hex etc.
+        if (defined($2)) { $c3 = -2 }  # Immediate is not decimal.
+        else { $sv += $1 }
+      } elsif ($inst =~ m@\[e([sb])p[+](?!-)(?:(([0-9][0-9a-fA-F]*)[hH]|0+|[1-9]\d*)\])?@) {
+        if (defined($3)) { --$c3 if hex($3) > ($1 eq "s" ? $sv : 0) }
+        elsif (defined($2)) { --$c3 if $2 > ($1 eq "s" ? $sv : 0) }
+        else { $c3 = -1 }  # Displacement (42) is not decimal.
+      }
+      ++$ecxc if $inst =~ m@, ecx\Z@;
+      ++$ebxc if $inst =~ m@, ebx\Z@;
+    }
+    if ($c3 >= 0 and $c3 <= 2 or ($c3 == 3 and $ecxc > 0 and $ebxc == 0)) {
+      print $outfh "_abi cc, rp$c3\n";  # Example meaning regparm(3) calling convention: __abitest cc, rp3
+    } elsif ($c3 == 3 and $ebxc > 0 and $ecxc == 0) {
+      print $outfh "_abi cc, watcall\n";  # OpenWatcom __watcall calling convention.
+    } else {
+      print STDERR "error: abitest $name failed c3=$c3 ecxc=$ecxc ebxc=$ebxc ($lc)\n";
+      return 1;
+    }
+  } elsif ($name eq "divdi3") {
+    # To check which regparm(...) value GCC is using for calling __divdi3,
+    # distinguishing between 0 and 3, irrespective of the GCC optimization
+    # level: Check the block of `push' and `mov' instructions preceding the
+    # `call __divdi3' instruction. If there are 4 `push [ebp+...]' or `push
+    # [esp+...]' instructions, then it's regparm(0). Otherwise, if there are 2
+    # `push [ebp+...]' or `push [esp+...]' instructions and a `mov eax,
+    # [...+...]' and a `mov edx, [...+...]' then it's regparm(3). Otherwise the
+    # detection has failed. The actual rule implemented is a bit more complex,
+    # to support different code generation.
+    #
+    # __extension__ __attribute__((used)) __attribute__((regparm(0))) static long long __abitest_divdi3(long long a, long long b) { return a / b; }
+    my $i = @$insts;
+    --$i while $i > 0 and $insts->[$i - 1] !~ m@\A\t*call __+divdi3\Z@;
+    if ($i == 0) {
+      print STDERR "error: missing call to __divdi3 in abitest $name ($lc)\n";
+      return 1;
+    }
+    --$i;
+    #print STDERR "divdi3_insts=(@$insts)\n";
+    my $movc = 0; my $pushc = 0;
+    while ($i > 0) {
+      if ($insts->[$i - 1] =~ m@\A\t*mov e[ad]x, \[e[bs]p+(?!-)@) {
+        ++$movc;
+        --$i;
+      } elsif ($insts->[$i - 1] =~ m@\A\t*mov \[esp(?:[+](?:0|[1-9]\d*))?\],@) {
+        ++$pushc;
+        --$i;
+      } elsif ($insts->[$i - 1] =~ m@\A\t*(?:push (?:dword )?\[e[bs]p[+](?!-)|(mov) e[ad]x,)@) {
+        --$i;
+        defined($1) ? ++$movc : ++$pushc;
+      } else {
+        last
+      }
+    }
+    if ($movc >= 2 and $pushc == 2) {
+      print $outfh "_abi cc_divdi3, rp3\n";
+    } elsif ($pushc == 4) {
+      print $outfh "_abi cc_divdi3, rp0\n";
+    } else {
+      print STDERR "error: abitest $name failed: movc=$movc pushc=$pushc ($lc)\n";
+      return 1;
+    }
+  } else {
+    print STDERR "error: unknown abitest $name, please update libc.h ($lc): $name\n";
+    return 1;
+  }
+  0
+}
+
 my %gp_regs = map { $_ => 1 } qw(al cl dl bl ah ch dh bh ax cx dx bx sp bp si di eax ecx edx ebx esp ebp esi edi);
 
 # --- Convert from GNU as (AT&T) syntax to NASM.
@@ -384,92 +475,6 @@ sub fix_reg($) {
   return "st0" if $reg eq "st";
   $reg =~ s@\Ast\((\d+)\)\Z(?!\n)@st$1@;
   $reg
-}
-
-sub process_abitest($$$$) {
-  my($outfh, $name, $insts, $lc) = @_;
-  if ($name eq "retsum") {
-    # To check which -mregparm=0 ... -regparm=3 was used for compilation,
-    # irrespective of the GCC optimization level: If there is a `sub esp, sv'
-    # instruction, remember sv. Othervise let sv be 0. Count the number of
-    # [esp+...] (only displacements larger than sv) and [ebp+...] (only
-    # positive displacements) effective addresses in the function code: c. Then
-    # the regparm value is (3 - c).
-    #
-    # __attribute__((used)) static int __abitest_retsum(int a1, int a2, int a3) { return a1 + a2 + a3; }
-    my $addc = 0;
-    for my $inst (@$insts) {
-      ++$addc if $inst =~ m@\A\t*add (?!esp,)@;
-    }
-    if ($addc != 2) {
-      print STDERR "error: expected 2 adds in abitest $name ($lc): $name\n";
-      return 1;
-    }
-    my $c3 = 3;
-    my $sv = 0;
-    for my $inst (@$insts) {
-      if ($inst =~ m@\A\t*sub esp, (0|[1-9]\d*|([^\[]]))$@) {  # TODO(pts): Hex etc.
-        if (defined($2)) { $c3 = -1 }  # Immediate is not decimal.
-        else { $sv += $1 }
-      } elsif ($inst =~ m@\[e([sb])p[+](?!-)(?:(0|[1-9]\d*)\])?@) {
-        if (defined($2)) { --$c3 if $2 > ($1 eq "s" ? $sv : 0) }
-        else { $c3 = -1 }  # Displacement is not decimal.
-      }
-    }
-    if ($c3 >= 0 and $c3 <= 3) {
-      print $outfh "_abi cc, rp$c3\n";  # Example meaning regparm(3) calling convention: __abitest cc, rp3
-    } else {
-      print STDERR "error: abitest $name failed ($lc)\n";
-      return 1;
-    }
-  } elsif ($name eq "divdi3") {
-    # To check which regparm(...) value GCC is using for calling __divdi3,
-    # distinguishing between 0 and 3, irrespective of the GCC optimization
-    # level: Check the block of `push' and `mov' instructions preceding the
-    # `call __divdi3' instruction. If there are 4 `push [ebp+...]' or `push
-    # [esp+...]' instructions, then it's regparm(0). Otherwise, if there are 2
-    # `push [ebp+...]' or `push [esp+...]' instructions and a `mov eax,
-    # [...+...]' and a `mov edx, [...+...]' then it's regparm(3). Otherwise the
-    # detection has failed. The actual rule implemented is a bit more complex,
-    # to support different code generation.
-    #
-    # __extension__ __attribute__((used)) __attribute__((regparm(0))) static long long __abitest_divdi3(long long a, long long b) { return a / b; }
-    my $i = @$insts;
-    --$i while $i > 0 and $insts->[$i - 1] !~ m@\A\t*call __+divdi3\Z@;
-    if ($i == 0) {
-      print STDERR "error: missing call to __divdi3 in abitest $name ($lc)\n";
-      return 1;
-    }
-    --$i;
-    #print STDERR "divdi3_insts=(@$insts)\n";
-    my $movc = 0; my $pushc = 0;
-    while ($i > 0) {
-      if ($insts->[$i - 1] =~ m@\A\t*mov e[ad]x, \[e[bs]p+(?!-)@) {
-        ++$movc;
-        --$i;
-      } elsif ($insts->[$i - 1] =~ m@\A\t*mov \[esp(?:[+](?:0|[1-9]\d*))?\],@) {
-        ++$pushc;
-        --$i;
-      } elsif ($insts->[$i - 1] =~ m@\A\t*(?:push (?:dword )?\[e[bs]p[+](?!-)|(mov) e[ad]x,)@) {
-        --$i;
-        defined($1) ? ++$movc : ++$pushc;
-      } else {
-        last
-      }
-    }
-    if ($movc >= 2 and $pushc == 2) {
-      print $outfh "_abi cc_divdi3, rp3\n";
-    } elsif ($pushc == 4) {
-      print $outfh "_abi cc_divdi3, rp0\n";
-    } else {
-      print STDERR "error: abitest $name failed: movc=$movc pushc=$pushc ($lc)\n";
-      return 1;
-    }
-  } else {
-    print STDERR "error: unknown abitest $name, please update libc.h ($lc): $name\n";
-    return 1;
-  }
-  0
 }
 
 # Converts GNU as syntax to NASM 0.98.39 syntax, Supports only a small
@@ -1026,6 +1031,8 @@ sub wasm2nasm($$$$$$) {
   my %segment_to_section = qw(_TEXT .text  CONST .rodata  CONST2 .rodata  _DATA .data  _BSS .bss);
   my %directive_to_segment = qw(.code _TEXT  .const CONST2  .data _DATA  .data? _BSS);  # TODO(pts): Is there a way for CONST2?
   my $end_expr;
+  my @abitest_insts;  # Label and list of instructions being buffered.
+  my $do_hide_abitest = 0;
   while (defined($first_line) or defined($first_line = <$srcfh>)) {
     ++$lc;
     ($_, $first_line) = ($first_line, undef);
@@ -1043,8 +1050,8 @@ sub wasm2nasm($$$$$$) {
       s@\s*,\s*@, @g;
     }
     if ($is_instr) {
-      die "$0: unsupported instruction in non-.text ($lc): $_\n" if $section ne ".text";
-      die "$0: unsupported quote in instruction ($lc): $_\n" if m@'@;  # Whitespace is already gone.
+      die "fatal: unsupported instruction in non-.text ($lc): $_\n" if $section ne ".text";
+      die "fatal: unsupported quote in instruction ($lc): $_\n" if m@'@;  # Whitespace is already gone.
       if (s~^(jmp|call) near ptr (?:FLAT:)?~$1 \$~) {
       } elsif (s@^(j[a-z]+|loop[a-z]*) ([^\[\],\s]+)$@$1 \$$2@) {   # Add $ in front of jump target label.
         s@\$`([^\s:\[\],+\-*/()<>`]+)`@\$$1@g;  # Remove backtick quotes. Usually they are not present here.
@@ -1079,9 +1086,24 @@ sub wasm2nasm($$$$$$) {
       if ($rodata_strs and $segment eq "CONST") {  # C string literals.
         push @$rodata_strs, $_;
       } else {
-        print $outfh "\t\t$_\n";
+        print $outfh "\t\t$_\n" if !$do_hide_abitest;
+        if (@abitest_insts) {
+          if ($_ eq "ret") {
+            my $abitest_name = shift(@abitest_insts);
+            # The emitted `_abi cc, watcall' or `_abi cc, rp0' may not be
+            # the before all labels and code, becase the OpenWatcom C
+            # compiler sometimes merges function body tails, and it may get
+            # merged to a later one.
+            exit(1) if process_abitest($outfh, $abitest_name, \@abitest_insts, $lc);
+            @abitest_insts = ();
+            $do_hide_abitest = 0;
+          } else {
+            push @abitest_insts, "\t\t$_\n";
+          }
+        }
       }
     } elsif (m@^[.]@) {
+      die "fatal: incomplete abitest ($lc): $_\n" if @abitest_insts;
       if ($_ eq ".387" or $_ eq ".model flat") {  # Ignore.
       } elsif (m@^[.]386@) {
         print $outfh "cpu 386\n";
@@ -1095,10 +1117,22 @@ sub wasm2nasm($$$$$$) {
     } elsif (m@^[^\s:\[\],+\-*/`]+:$@) {  # Label.  TODO(pts): Convert all labels, e.g. eax to $eax.
       if ($rodata_strs and $segment eq "CONST") {
         push @$rodata_strs, "\$$_";
+      } elsif (m@^__abitest_(.*?)_?:$@) {
+        die "fatal: overlapping abitest ($lc): $_\n" if @abitest_insts;
+        @abitest_insts = ($1);
+        $do_hide_abitest = 1;
       } else {
+        if ($do_hide_abitest) {  # It overlaps with code of another function.
+          for (my $i = 1; $i < @abitest_insts; ++$i) {
+            print $outfh "$abitest_insts[$i]\n";
+          }
+          $do_hide_abitest = 0;
+        }
         print $outfh "_start:\n" if $_ eq "_start_:" or $_ eq "_mainCRTStartup:";  # Add extra start label for entry point.
         print $outfh "\$$_\n";
       }
+    } elsif (@abitest_insts) {
+      die "fatal: incomplete abitest ($lc): $_\n" if @abitest_insts;
     } elsif (s@^(d[bwd])(?= )@@i) {
       my $cmd = lc($1);
       s@\boffset (?:FLAT:)?@\$@g if !m@'@;
@@ -1139,6 +1173,7 @@ sub wasm2nasm($$$$$$) {
       die "fatal: unsupported WASM instruction ($lc): $_\n" ;
     }
   }
+  die "fatal: incomplete abitest ($lc): $_\n" if @abitest_insts;
   if (defined $end_expr) {
     print $outfh "\$_start equ $end_expr\n" if $end_expr ne "_start";
   }

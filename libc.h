@@ -33,7 +33,7 @@
 
 #ifdef __WATCOMC__
 #define main main_from_libc  /* TODO(pts): Rename at assembler level, add symbol alias here. For OpenWatcom. */
-extern int __LIBC_CALL main(int argc, char **argv);
+/*extern int __LIBC_CALL main(int argc, char **argv);*/
 #endif
 
 #define NULL ((void*)0)
@@ -109,6 +109,11 @@ __attribute__((used)) static int __abitest_retsum(int a1, int a2, int a3) { retu
  * __abitest_divdi3 itself).
  */
 __extension__ __attribute__((used)) __attribute__((regparm(0))) static long long __abitest_divdi3(long long a, long long b) { return a / b; }
+#endif
+
+#ifdef __WATCOMC__
+/* See the other __abitest_retsum above. */
+int __abitest_retsum(int a1, int a2, int a3) { return a1 + a2 + a3; }
 #endif
 
 /* --- <stdarg.h> */

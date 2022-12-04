@@ -458,7 +458,7 @@ sub as2nasm($$$$$$$$$) {
         }
       } else {
         print $outfh "$label:\n";
-        print $outfh "_start:\n" if $label eq "F__start";  # !! TODO(pts): Indicate the entry point smarter.
+        print $outfh "_start:\n" if $label eq "F__start" or $label eq "F__mainCRTStartup";  # !! TODO(pts): Indicate the entry point smarter.
       }
       $defined_labels{$label} = 1;
       if (exists($define_when_defined->{$label})) {
@@ -476,7 +476,7 @@ sub as2nasm($$$$$$$$$) {
       } elsif (m@\A[.]globl ([^\s:,]+)\Z@) {
         my $label = fix_label($1, \@bad_labels, $used_labels, \%local_labels);
         print $outfh "global $label\n";
-        print $outfh "global _start\n" if $label eq "F__start";  # !! TODO(pts): Indicate the entry point smarter.
+        print $outfh "global _start\n" if $label eq "F__start" or $label eq "F__mainCRTStartup";  # !! TODO(pts): Indicate the entry point smarter.
         if (exists($defined_labels{$label})) {
           ++$errc;
           print STDERR "error: label defined before .global ($lc): $label\n";

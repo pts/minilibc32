@@ -169,13 +169,12 @@ sub print_merged_strings_in_strdata($$$) {
       }
       if ($lofs != $oldofss[$i] or exists($mapi{$i})) {
         if (exists($mapi{$i})) {
-          # !! TODO(pts): Find a later, closer label, report relative offset there.
-          #print STDERR "$label equ __strs+$ofs  ; old=$lofs\n";
+          # !! TODO(pts): Find a later (or earlier), closer label, report relative offset there.
           print $outfh "$label equ __strs+$ofs  ; old=$lofs\n";
         } else {
           my $dofs = $lofs - $oldofss[$i];
-          #print $outfh "$label equ \$+$dofs\n";
-          print STDERR "$label equ \$+$dofs\n";
+          #print STDERR "$label equ \$+$dofs\n";
+          print $outfh "$label equ \$+$dofs\n";
         }
       } else {
         #print STDERR "$label:\n";

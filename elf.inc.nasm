@@ -582,7 +582,18 @@ db 0x0f, 5
 %endm
 
 %macro _end 0-1 _start
-__elf_entry equ (%1)  ; Labels in %1 must be defined by now.
+%define __ELF_SAVED_ENTRY (%1)  ; %1 is cleared by %include in NASM 0.98.39.
+%ifdef _PROG_BEFORE_END
+  section .text
+  _PROG_BEFORE_END  ; Typically this %include()s the libc.
+%endif
+%ifdef _PROG_NO_START  ; Generate incorrect ELF, but don't report fatal error message, so we can see the other errors.
+  section .text
+  mov eax, _start  ; A non-fatal error message in NASM 0.98.39 `-f bin'.
+  __elf_entry equ $  ; Will be incorrect.
+%else
+  __elf_entry equ (__ELF_SAVED_ENTRY)  ; Labels in %1 must be defined by now. Can cause a fatal error in NASM 0.98.39 `-f bin'.
+%endif
 section .ehdr
 __ehdr_end:
 times ($$-$) & 3 db 0  ; Should be a no-op.

@@ -292,7 +292,16 @@ sub print_nasm_header($$$$$) {
 %endif
 );
   }
-  print $outfh qq(%macro _abi 2\n%endm\n);
+  print $outfh qq(%ifndef _PROG_MACRO_ABI_DEFINED
+  %macro _abi 2
+  %endm
+%endif
+%ifidn __OUTPUT_FORMAT__, bin
+  %macro __dummy_extern 1  ; Add symbol name to NASM 0.98.39 error message.
+  %endm
+  %define extern __dummy_extern
+%endif
+);
   # After elf.inc.nasm, because it may modify the CPU level.
   my $cpulevel_str = ($cpulevel > 6 ? "" : $cpulevel >= 3 ? "${cpulevel}86" : "386");  # "prescott" would also work for $cpulevel > 6;
   print $outfh "cpu $cpulevel_str\n" if length($cpulevel_str);
@@ -482,8 +491,8 @@ sub fix_reg($) {
 # hand-written .as files also work.
 #
 # !! Rename local labels (L_* and also non-.globl F_) by file: L1_* F2_*.
-sub as2nasm($$$$$$$$$) {
-  my($srcfh, $outfh, $first_line, $lc, $rodata_strs, $is_win32, $undefineds, $define_when_defined, $common_by_label) = @_;
+sub as2nasm($$$$$$$$$$) {
+  my($srcfh, $outfh, $first_line, $lc, $rodata_strs, $is_win32, $undefineds, $define_when_defined, $common_by_label, $is_start_found_ref) = @_;
   my %unknown_directives;
   my $errc = 0;
   my $is_comment = 0;
@@ -567,7 +576,10 @@ sub as2nasm($$$$$$$$$) {
         $defined_labels{$label} = 1;
       } else {
         print $outfh "$label:\n";
-        print $outfh "_start:\n" if $label eq "F__start" or $label eq "F__mainCRTStartup";  # !! TODO(pts): Indicate the entry point smarter.
+        if ($label eq "F__start" or $label eq "F__mainCRTStartup") {  # !! TODO(pts): Indicate the entry point smarter.
+          print $outfh "_start:\n";
+          $$is_start_found_ref = 1;
+        }
       }
       $defined_labels{$label} = 1;
       if (exists($define_when_defined->{$label})) {
@@ -1022,8 +1034,8 @@ sub as2nasm($$$$$$$$$) {
 # source files won't work.
 #
 # The input file come from `wdis -a' or `wdis -a -fi'.
-sub wasm2nasm($$$$$$) {
-  my($srcfh, $outfh, $first_line, $lc, $rodata_strs, $is_win32) = @_;
+sub wasm2nasm($$$$$$$) {
+  my($srcfh, $outfh, $first_line, $lc, $rodata_strs, $is_win32, $is_start_found_ref) = @_;
   my $section = ".text";
   my $segment = "";
   my $bss_org = 0;
@@ -1128,7 +1140,12 @@ sub wasm2nasm($$$$$$) {
           }
           $do_hide_abitest = 0;
         }
-        print $outfh "_start:\n" if $_ eq "_start_:" or $_ eq "_mainCRTStartup:";  # Add extra start label for entry point.
+        if ($_ eq "_start_:" or $_ eq "_mainCRTStartup:") {  # Add extra start label for entry point.
+          print $outfh "_start:\n";
+          $$is_start_found_ref = 1;
+        } elsif ($_ eq "_start:") {
+          $$is_start_found_ref = 1;
+        }
         print $outfh "\$$_\n";
       }
     } elsif (@abitest_insts) {
@@ -1250,9 +1267,10 @@ my $cpulevel = 7;
 my $outfn;
 my $do_merge_tail_strings = 1;
 my $data_alignment = 4;
-my $outfmt = "elfprog";
+my $outfmt = "prog";
 my $nasm_prog = "nasm";
 my $is_win32 = 0;  # TODO(pts): Autodetect it in .wasm source based on `extrn'. But then `-o' extension needs autodection.
+my $do_add_libc = 1;  # Add libc when linking (final executable program, $outfmt eq "prog").
 # TODO(pts): Add flag to inline elf.inc.nasm.
 while ($i < @ARGV) {
   my $arg = $ARGV[$i++];
@@ -1273,6 +1291,8 @@ while ($i < @ARGV) {
     $is_win32 = 1;
   } elsif ($arg eq "-blinux") {  # Default. `-blinux' is for OpenWatcom `owcc'.
     $is_win32 = 0;
+  } elsif ($arg eq "-nostdlib" or $arg eq "-fnostdlib") {  # -nostdlib is GCC, -fnostdlib is OpenWatcom.
+    $do_add_libc = 0;
   } elsif ($arg =~ m@-march=(.*)\Z(?!\n)@) {
     my $value = lc($1);
     if ($value eq "i386") { $cpulevel = 3 }
@@ -1296,7 +1316,7 @@ while ($i < @ARGV) {
   } elsif ($arg =~ m@--outfmt=(.*)\Z(?!\n)@) {
     $outfmt = lc($1);
     die "fatal: bad output format: $outfmt" if !
-        ($outfmt eq "nasm" or $outfmt eq "elfobj" or $outfmt eq "elfprog");
+        ($outfmt eq "nasm" or $outfmt eq "elfobj" or $outfmt eq "elfprog" or $outfmt eq "prog");
   } elsif ($arg =~ m@--nasm=(.*)\Z(?!\n)@) {
     die "fatal: bad nasm program; $nasm_prog\n" if !length($nasm_prog);
     $nasm_prog = $1;
@@ -1308,6 +1328,10 @@ die "fatal: missing source file\n" if $i >= @ARGV;
 die "fatal: too many source files, only one allowed\n" if $i > @ARGV + 1;
 my $srcfn = $ARGV[$i];
 die "fatal: missing NASM-assembly output file\n" if !defined($outfn);
+if ($outfmt eq "elfprog") {
+  die "fatal: --outfmt=elfprog conflicts with -bwin32; use --outfmt=prog instead\n" if $is_win32;
+  $outfmt = "prog";
+}
 
 my @unlink_fns;
 my $srcfh;
@@ -1351,14 +1375,15 @@ my $errc = 0;
 my $rodata_strs = $do_merge_tail_strings ? [] : undef;
 my $define_when_defined = {};  # This won't work for multiple source files.
 my $common_by_label = {};
-my $mydirp = ($0 =~ m@\A(.*/)@ ? $1 : "");  # TODO(pts): Win32 compatibility.
+my $mydirp = ($0 =~ m@\A(.*/)@s ? $1 : "");  # TODO(pts): Win32 compatibility.
 $mydirp = "" if $mydirp =~ m@\A[.]/+@;
 print_nasm_header($nasmfh, $cpulevel, $data_alignment, $is_win32, $mydirp);
 --$lc;  # We reuse $first_line.
+my $is_start_found = 0;
 if ($srcfmt eq "as") {
   print STDERR "info: converting from GNU as to NASM syntax: $srcfn to $nasmfn\n";
   my $undefineds = {};
-  $errc += as2nasm($srcfh, $nasmfh, $first_line, $lc, $rodata_strs, $is_win32, $undefineds, $define_when_defined, $common_by_label);
+  $errc += as2nasm($srcfh, $nasmfh, $first_line, $lc, $rodata_strs, $is_win32, $undefineds, $define_when_defined, $common_by_label, \$is_start_found);
   print $nasmfh "\nsection .rodata\n" if $rodata_strs and @$rodata_strs;
   print_merged_strings_in_strdata($nasmfh, $rodata_strs, 1);
   if (%$undefineds) {
@@ -1369,7 +1394,7 @@ if ($srcfmt eq "as") {
   }
 } elsif ($srcfmt eq "wasm") {
   print STDERR "info: converting from WASM to NASM syntax: $srcfn to $nasmfn\n";
-  wasm2nasm($srcfh, $nasmfh, $first_line, $lc, $rodata_strs, $is_win32);
+  wasm2nasm($srcfh, $nasmfh, $first_line, $lc, $rodata_strs, $is_win32, \$is_start_found);
   print $nasmfh "\nsection .rodata\n" if $rodata_strs and @$rodata_strs;
   print_merged_strings_in_strdata($nasmfh, $rodata_strs, 0);
 } elsif ($srcfmt eq "nasm") {  # Just copy the lines.
@@ -1383,13 +1408,169 @@ print $nasmfh "\n; __END__\n";
 die "fatal: error writing NASM-assembly output\n" if !close($nasmfh);
 close($srcfh);
 
-if ($outfmt eq "elfprog" or $outfmt eq "elfobj") {
+if ($outfmt eq "prog" or $outfmt eq "elfobj") {
   unlink($outfn);
-  my $nasmfmt = ($outfmt eq "elfprog" ? "bin" : "elf");  # With `-f bin', elf.inc.nasm will do the linking. !!
-  my @nasm_link_cmd = ($nasm_prog, "-O999999999", "-w+orphan-labels", "-f", $nasmfmt, "-o", argv_escape_fn($outfn), argv_escape_fn($nasmfn));
-  print STDERR "info: running nasm_link_cmd: @nasm_link_cmd\n";
-  die "fatal: nasm_link_cmd failed: @nasm_link_cmd\n" if system(@nasm_link_cmd);
-  if ($outfmt eq "elfprog") {  # Make it executable.
+  my $nasmfmt = ($outfmt eq "prog" ? "bin" : "elf");  # With `-f bin', elf.inc.nasm or pe.inc.nasm will do the linking.
+  my $do_extract_undefineds = ($outfmt eq "prog" and $do_add_libc);
+  my @nasm_link_cmd = ($nasm_prog, "-O999999999", "-w+orphan-labels", "-f", $nasmfmt);
+  my $saveerr;
+  my $cmd_suffix = "";
+  my $errfn;
+  # TODO(pts): Also redirect on -Werror (turn NASM warnings to errors).
+  my $nasm_link_cmd_i = @nasm_link_cmd;
+  my $is_nostart_first = ($do_extract_undefineds and !$is_start_found);
+  if ($do_extract_undefineds) {
+    # We redirect stderr, because NASM 0.98.39 -E for error file is -Z in newer versions.
+    $errfn = "$outfn.tmp.nasmerr";
+    push @unlink_fns, $errfn;
+    $cmd_suffix = " 2>$errfn";
+    die if !open($saveerr, ">&", \*STDOUT);
+    die "fatal: open: $errfn: $!\n" if !open(STDERR, ">", $errfn);
+    push @nasm_link_cmd, "-D_PROG_NO_START" if $is_nostart_first;
+  }
+  push @nasm_link_cmd, "-o", argv_escape_fn($outfn), argv_escape_fn($nasmfn);
+  { my $stderr = defined($saveerr) ? $saveerr : \*STDERR;
+    print $stderr "info: running nasm_link_cmd: @nasm_link_cmd$cmd_suffix\n";
+    my $fh = select($stderr); $| = 1; select($fh);  # Flush.
+  }
+  my $is_nasm_link_ok = !system(@nasm_link_cmd);
+  if (defined($saveerr)) {
+    die if !open(STDERR, ">&", $saveerr);
+    close($saveerr);
+  }
+  if (!$is_nasm_link_ok) {
+    my $had_other_messages = 1;
+    my $maybe_more_undefineds = 0;
+    my %undefineds;
+    my @undefineds;
+    if ($do_extract_undefineds) {
+      my $errfh;
+      die "fatal: open $errfn: $!\n" if !open($errfh, "<", $errfn);
+      my $do_hide_dots = 0;
+      $had_other_messages = 0;
+      while (<$errfh>) {
+        if (m@\A(.*?:\d+: )@) {
+          pos($_) = length($1);
+          if (m@\Gerror: symbol `(.+)' not defined before use\Z@) {  # NASM 0.98.39 fatal error.
+            $undefineds{$1} = 1; $do_hide_dots = 1; $maybe_more_undefineds = 1;
+          } elsif (m@\Gerror: symbol `(.+)' undefined\Z@) {
+            $undefineds{$1} = 1; $do_hide_dots = 1;
+          } elsif (m@\G[.][.][.] @) {  # Provides macro source line.
+            print STDERR $_ if !$do_hide_dots;
+          } elsif (m@\Gerror: binary output format does not support external references\Z@) {
+            $do_hide_dots = 1; $maybe_more_undefineds = 1;
+          } elsif (m@\Gerror: phase error detected at end of assembly@) {  # With a `.'.
+            $do_hide_dots = 0;
+            if (!%undefineds) {
+              $had_other_messages = 1;
+              print STDERR $_;
+            }
+          } else {
+            $do_hide_dots = 0; $had_other_messages = 1;
+            print STDERR $_;
+          }
+        }
+      }
+      close($errfh);
+      unlink($errfn);
+      if (%undefineds or $maybe_more_undefineds) {
+        @undefineds = sort(keys(%undefineds));
+        push @undefineds, "+more" if $maybe_more_undefineds;
+        if ($had_other_messages) {
+          # Line number info is lost, but we try NASM again with libc, so it doesn't matter.
+          print STDERR "error: undefined symbols: @undefineds\n";
+        } elsif ($maybe_more_undefineds) {
+          if (!$is_nostart_first) {
+            print STDERR "info: running NASM again to find more undefined symbols: @undefineds\n";
+          } else {
+            print STDERR "fatal: assert: not all undefined symbols found\n";  # This must be an internal error hapening with NASM 0.98.39.
+            $had_other_messages = 1;  # Will exit below.
+          }
+        } else {
+          print STDERR "info: running NASM again to get symbols from libc: @undefineds\n";
+        }
+      }
+    }
+    die "fatal: nasm_link_cmd failed: @nasm_link_cmd\n" if $had_other_messages;
+    splice @nasm_link_cmd, $nasm_link_cmd_i, 1 if $is_nostart_first;
+    if ($maybe_more_undefineds) {
+      splice @nasm_link_cmd, $nasm_link_cmd_i, 0, "-D_PROG_NO_START";
+      die if !open($saveerr, ">&", \*STDOUT);
+      die "fatal: open: $errfn: $!\n" if !open(STDERR, ">", $errfn);
+      { my $stderr = defined($saveerr) ? $saveerr : \*STDERR;
+        print $stderr "info: running nasm_find_cmd: @nasm_link_cmd$cmd_suffix\n";
+        my $fh = select($stderr); $| = 1; select($fh);  # Flush.
+      }
+      my $is_nasm_find_ok = !system(@nasm_link_cmd);  # Ignore return value, always go on.
+      if (defined($saveerr)) {
+        die if !open(STDERR, ">&", $saveerr);
+        close($saveerr);
+      }
+      my $errfh;
+      die "fatal: open $errfn: $!\n" if !open($errfh, "<", $errfn);
+      $had_other_messages = 0;
+      %undefineds = ();
+      while (<$errfh>) {
+        next if !m@\A(.*?:\d+: )@;
+        pos($_) = length($1);
+        if (m@\Gerror: symbol `(.+)' undefined\Z@) {
+          $undefineds{$1} = 1;
+        } elsif (m@\G[.][.][.] @) {  # Provides macro source line.
+        } elsif (m@\Gerror: phase error detected at end of assembly@) {  # With a `.'.
+        } else {
+          print STDERR $_;
+          $had_other_messages = 1;
+        }
+      }
+      close($errfh);
+      unlink($errfn);
+      # TODO(pts): Report these errors.
+      die "fatal: nasm_find_cmd failed: @nasm_link_cmd\n" if $had_other_messages;
+      @undefineds = sort(keys(%undefineds));
+      print STDERR "info: running NASM again to get symbols from libc: @undefineds\n";
+      splice @nasm_link_cmd, $nasm_link_cmd_i, 1;
+    }
+    my $nlifn = "$outfn.tmp.nasmlibc";
+    my $nlifh;
+    die "fatal: open libc includer NASM source file: $nlifn\n: $!" if !open($nlifh, ">", $nlifn);
+    print $nlifh "; .nasm libc includer source file generated by as2nasm\n\n";
+    for my $label (@undefineds) {
+      print $nlifh "%define __LIBC_NEED_$label\n";
+    }
+    my $win32def = $is_win32 ? "%define __LIBC_WIN32\n" : "";
+    print $nlifh qq(
+$win32def%define __LIBC_INCLUDED
+%macro __include_libc 0
+%include '${mydirp}minilibc32.nasm'
+%endm
+%define _PROG_BEFORE_END __include_libc
+%macro _abi 2
+  %define __LIBC_ABI_%1_%2  ; Example: `%define __LIBC_ABI_cc_rp3' is regparm(3) calling convention.
+  %ifdef __LIBC_ABI_%1__val
+    %ifnidn __LIBC_ABI_%1__val,%2
+      %error Conflict in __LIBC_ABI_%1__val_: __LIBC_ABI_%1__val vs %2
+      times -1 nop  ; Force error on NASM 0.98.39.
+    %endif
+  %else
+    %define __LIBC_ABI_%1__val %2
+  %endif
+%endm
+%define _PROG_MACRO_ABI_DEFINED
+%include '$nasmfn'
+);
+    @undefineds = ();  # Save memory.
+    die "fatal: error libc includer NASM source file\n" if !close($nlifh);
+    close($nlifh);
+    push @unlink_fns, $nlifn;
+    $nasm_link_cmd[-1] = argv_escape_fn($nlifn);
+    print STDERR "info: running nasm_link_libc_cmd: @nasm_link_cmd\n";
+    die "fatal: nasm_link_libc_cmd failed: @nasm_link_cmd\n" if system(@nasm_link_cmd);
+  } elsif ($is_nostart_first) {  # Initial guess was incorrect, we need to run NASM again without -D_PROG_NO_START.
+    splice @nasm_link_cmd, $nasm_link_cmd_i, 1;
+    print STDERR "info: running nasm_link_fix_cmd: @nasm_link_cmd\n";
+    die "fatal: nasm_link_fix_cmd failed: @nasm_link_cmd\n" if system(@nasm_link_cmd);
+  }
+  if ($outfmt eq "prog") {  # Make it executable.
     # TODO(pts): Ignore this on Win32 (?).
     my @st = stat($outfn);
     if (@st) {
@@ -1401,6 +1582,5 @@ if ($outfmt eq "elfprog" or $outfmt eq "elfobj") {
 
 # TODO(pts): Do it even on failure.
 for my $filename (@unlink_fns) { unlink($filename); }
-
 
 __END__

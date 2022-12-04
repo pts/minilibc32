@@ -37,6 +37,11 @@
 		bits 32
 		cpu 386
 
+%ifdef __LIBC_WIN32
+%error 'This libc does not support Win32 yet.'  ; !! TODO(pts): Implement support.
+times -1 nop  ; Force error on NASM 0.98.39.
+%endif
+
 %ifidn __OUTPUT_FORMAT__,obj  ; OpenWatcom segments.
 		section _TEXT  USE32 class=CODE align=1
 		section CONST  USE32 class=DATA align=1  ; OpenWatcom generates align=4.
@@ -45,21 +50,37 @@
 		section _BSS   USE32 class=BSS NOBITS align=4  ; NOBITS is ignored by NASM, but class=BSS works.
 		group DGROUP CONST CONST2 _DATA _BSS
 		section _TEXT
+  %define __LIBC_BSS _BSS  ; Section name.
 %else
+  %ifndef __LIBC_INCLUDED
 		section .bss align=4
 		section .text align=1
 		section .text
-%define _BSS .bss  ; Section name.
+  %endif
+  %define __LIBC_BSS .bss  ; Section name.
 %endif
 
-%ifidn __OUTPUT_FORMAT__,elf  ; GCC regparm(3) calling convention.
-%define SYM(name) name %+ __RP3__  ; GCC regparm(3) calling convention is indicated for minilibc32 GCC.
-%define REGARG3 ecx
-%define REGNARG ebx  ; A register which is not used by the first 3 function arguments.
-%else  ; OpenWatcom __watcall calling convention.
-%define SYM(name) name %+ _  ; OpenWatcom __watcall calling convention is indicated with a trailing `_' by OpenWatcom.
-%define REGARG3 ebx
-%define REGNARG ecx
+%ifndef __LIBC_ABI_cc__val
+  %ifidn __OUTPUT_FORMAT__,elf  ; Guess GCC regparm(3) calling convention.
+    %define __LIBC_ABI_cc__val rp3
+    %define __LIBC_ABI_cc_rp3
+  %else  ; Guess OpenWatcom __watcall calling convention.
+    %define __LIBC_ABI_cc__val watcall
+    %define __LIBC_ABI_cc_watcall
+  %endif
+%endif
+
+%ifidn __LIBC_ABI_cc__val,rp3  ; GCC regparm(3) calling convention.
+  %define SYM(name) name %+ __RP3__  ; GCC regparm(3) calling convention is indicated for minilibc32 GCC.
+  %define REGARG3 ecx
+  %define REGNARG ebx  ; A register which is not used by the first 3 function arguments.
+%elifidn __LIBC_ABI_cc__val,watcall  ; OpenWatcom __watcall calling convention.
+  %define SYM(name) name %+ _  ; OpenWatcom __watcall calling convention is indicated with a trailing `_' by OpenWatcom.
+  %define REGARG3 ebx
+  %define REGNARG ecx
+%else
+  %error 'Unknown calling convention for libc.'
+  times -1 nop  ; Force error on NASM 0.98.39.
 %endif
 
 ; --- Generic i386 functions.
@@ -261,7 +282,9 @@ extern SYM($main_from_libc)
 extern $main  ; No SYM(...), this is user-defined.
 %endif
 %ifidn __OUTPUT_FORMAT__,bin
+%ifndef __LIBC_INCLUDED
 SYM($main_from_libc) equ $$  ; Dummy value to avoid undefined symbols.
+%endif
 %endif
 $_start:  ; Program entry point.
 		pop eax			; argc.
@@ -678,7 +701,7 @@ $__I8LS:
 
 ; --- Rest of the program code, to avoid undefined labels.
 
-		section _BSS
+		section __LIBC_BSS
 
 $__malloc_base	resd 1  ; char *base;
 $__malloc_free	resd 1  ; char *free;

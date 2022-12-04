@@ -267,6 +267,8 @@ section .text  ; !! Implement .rodata.
 section .text  ; !! Implement .data.
 %elifidn %1,.bss
 section .bss
+%elifidn %1,__LIBC_BSS  ; Expansion workaround.
+section .bss
 %else
 %error Unsupported Win32 PE _section: %1
 times -1 nop
@@ -682,8 +684,19 @@ kcall ExitProcess
   %else
   %define __PLEASE_CALL__end__ __PLEASE_CALL__end__
   %endif
+  %define __PE_SAVED_ENTRY (%1)  ; %1 is cleared by %include in NASM 0.98.39.
+  %ifdef _PROG_BEFORE_END
+    section .text
+    _PROG_BEFORE_END  ; Typically this %include()s the libc.
+  %endif
+  %ifdef _PROG_NO_START  ; Generate incorrect ELF, but don't report fatal error message, so we can see the other errors.
+    section .text
+    mov eax, _start  ; A non-fatal error message in NASM 0.98.39 `-f bin'.
+    __ENTRY_POINT__ equ $  ; Will be incorrect.
+  %else
+    __ENTRY_POINT__ equ (__PE_SAVED_ENTRY)  ; Labels in %1 must be defined by now. Can cause a fatal error in NASM 0.98.39 `-f bin'.
+  %endif
   %undef section  ; Revert from __pe_section to built-in.
-  __ENTRY_POINT__ equ (%1)
   section stub
   %if $-$$==0
     ; 0x40-byte PE DOS stub, based on:

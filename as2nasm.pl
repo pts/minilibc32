@@ -880,7 +880,7 @@ sub wasm2nasm($$$$$$) {
             "$1$2 " . (defined($3) ? "[$4$dspl]" : "[\$$5]") @ge;
         s@([\s,])([^\[\],\s]+)\[(.*?)\]@${1}[$3+$2]@g;  # `cmp al, 42[esi]'   -->  `cmp al, [esi+42]'.
         s@([-+])FLAT:([^,]+)@$1\$$2@g;
-        s@\boffset (?:FLAT:)?([^\s,+\-\[\]*/()<>]+)@ \$$1@g;
+        s@([\s:\[\],+\-*/()<>])offset (?:FLAT:)?([^\s,+\-\[\]*/()<>]+)@$1\$$2@g;
         s@\$`([^\s:\[\],+\-*/()<>`]+)`@\$$1@g;  # Remove backtick quotes in `call dword [$`__imp__GetStdHandle@4`]`.
         if (m@^([a-z0-9]+) (?:byte|word|dword) ([^,]+)(, *(?:byte |word |dword )?([^,]+))?$@) {
           if (exists($gp_regs{$2}) or (defined($4) and $1 ne "movsx" and $1 ne "movzx" and exists($gp_regs{$4}))) {

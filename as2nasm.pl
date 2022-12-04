@@ -28,7 +28,8 @@ use strict;
 # $outfh is the filehandle to write NASM assembly lines to.
 #
 # $rodata_strs is a reference to an array containing assembly source lines
-# (`label:' and `db: ...') in `section .rodata.str1.1' (GCC, GNU as; already
+# (`label:' and `db: ...') in `section .rodata', `section .rdata' and
+# `section .rodata.str1.1' (GCC, GNU as; already
 # converted to db) or `CONST SEGMENT' (OpenWatcom WASM). It will be cleared
 # as a side effect.
 #
@@ -406,7 +407,7 @@ sub as2nasm($$$$$$$$) {
         s@/[*].*?[*]/|("(?:[^\\"]+|\\.)*")@ defined($1) ? $1 : " " @sge;
         s@/[*].*|("(?:[^\\"]+|\\.)*")@ $is_comment = 1 if !defined($1); defined($1) ? $1 : "" @sge;
       } else {  # Easier.
-        s@/[*].*?[*]/@ @sg;  # !!! TODO(pts): Parse .string "/*"
+        s@/[*].*?[*]/@ @sg;
         $is_comment = 1 if s@/[*].*@@s;  # Start of multiline comment.
       }
     }
@@ -446,7 +447,12 @@ sub as2nasm($$$$$$$$) {
       }
       my $label = fix_label($1, \@bad_labels, $used_labels, \%local_labels);
       if (length($section) == 1) {
-        push @$rodata_strs, "$label:";
+        if ($label =~ m@\A(?:L_C|F_LC)@) {  # Label for string literal, e.g. .LC0 (GCC 7.5 on Linux) or LC0 (MinGW GCC 4.8.2).
+          push @$rodata_strs, "$label:";
+        } else {
+          $section = ".rodata";
+          print $outfh "$label:\n";
+        }
       } else {
         print $outfh "$label:\n";
         print $outfh "_start:\n" if $label eq "F__start";  # !! TODO(pts): Indicate the entry point smarter.
@@ -521,17 +527,16 @@ sub as2nasm($$$$$$$$) {
         # !! What is .text.unlikely?
         $section = ".text";  # !! Any better?
         print $outfh "section $section\n";
-      } elsif (m@\A[.]section [.]rodata[.]str1[.]1 *(?:,|\Z)@) {
+      } elsif (m@\A[.]section [.]ro?data(?:[.]str[.a-z0-9]*)?(?:\Z|\s*,)@) {
+        # Example $_ for MinGW: .section .rdata,"dr"
+        # Example $_: .section .rodata.str1.1,...
         if ($rodata_strs) {
           $section = "S";
+          print $outfh "section .rodata\n";
         } else {
-          $section = ".rodata";  # !! Any better? Move all after .rodata?
+          $section = ".rodata";
           print $outfh "section $section\n";
         }
-      } elsif (m@\A[.]section [.]ro?data(?:\Z|\s*,)@) {
-        # Example $_ for MinGW: .section .rdata,"dr"
-        $section = ".rodata";
-        print $outfh "section $section\n";
       } elsif (m@\A[.]section [.]note[.]GNU-stack[,]@) {
         # Non-executable stack marker: .section .note.GNU-stack,"",@progbits
         # !! respect it.
@@ -549,7 +554,7 @@ sub as2nasm($$$$$$$$) {
           $externs{$label} = 1;
         }
       } elsif (m@\A[.]comm ([^\s:,]+), *(0|[1-9]\d*), *(0|[1-9]\d*)\Z@) {
-        if (length($section) <= 1) {
+        if (!length($section)) {
           ++$errc;
           print STDERR "error: .comm outside section ($lc): $_\n";
         } else {
@@ -577,7 +582,7 @@ sub as2nasm($$$$$$$$) {
           }
         }
       } elsif (m@\A[.]align (0|[1-9]\d*)\Z@) {
-        if (length($section) <= 1) {
+        if (!length($section)) {
           ++$errc;
           print STDERR "error: .align outside section ($lc): $_\n";
         } elsif ($section eq ".bss") {
@@ -585,6 +590,7 @@ sub as2nasm($$$$$$$$) {
           print STDERR "error: .align in .bss ignored ($lc): $_\n" if !exists($unknown_directives{".align/bss"});
           $unknown_directives{".align/bss"} = 1;
         } else {
+          $section = ".rodata" if length($section) == 1;  # Not a string literal.
           my $alignment = $1 + 0;
           if ($alignment & ($alignment - 1)) {
             ++$errc;
@@ -611,7 +617,17 @@ sub as2nasm($$$$$$$$) {
       } elsif (m@\A[.](byte|value|long) (\S.*)\Z@) {  # !! 64-bit data? floating-point data?
         my $inst1 = $1;
         my $expr = fix_labels($2, \@bad_labels, $used_labels, \%local_labels);
-        if (length($section) <= 1) {
+        if (length($section) > 1) {
+        } elsif (length($section) != 0) {  # "S", @$rodata_strs.
+          # It doesn't look like a string. Pop and print preceding labels as well.
+          # TODO(pts): Don't pop end-line labels (ending the previous string in hand-written assembly).
+          my $i = @$rodata_strs;
+          --$i while $i > 0 and substr($rodata_strs->[$i - 1], -1) eq ":";
+          for (my $j = $i; $j < @$rodata_strs; ++$j) {
+            print $outfh "$rodata_strs->[$j]\n";
+          }
+          splice @$rodata_strs, $i;
+        } else {
           ++$errc;
           print STDERR "error: .$inst1 outside section ($lc): $_\n";
         }

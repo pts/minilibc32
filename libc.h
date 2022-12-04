@@ -29,7 +29,7 @@
 #  define __LIBC_NORETURN __declspec(aborts)
 #endif
 
-#define open open3  /* Avoid using the OpenWatcom C compiler using the `...' form. TODO(pts): Rename assembly symbols in OpenWatcom. */
+#define open open3  /* Avoid using the OpenWatcom C compiler using the `...' form. TODO(pts): Rename assembly symbols in OpenWatcom. #pragma aux sym obj_name [;] */
 
 #ifdef __WATCOMC__
 #define main main_from_libc  /* TODO(pts): Rename at assembler level, add symbol alias here. For OpenWatcom. */

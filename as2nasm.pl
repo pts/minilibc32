@@ -402,8 +402,15 @@ sub as2nasm($$$$$$$$) {
       $is_comment = 0;
     }
     y@[\r\n]@@;
-    s@/[*].*?[*]/@ @sg;  # !!! TODO(pts): Parse .string "/*"
-    $is_comment = 1 if s@/[*].*@@s;  # Start of multiline comment.
+    if (m@/[*]@) {
+      if (m@"@) {
+        s@/[*].*?[*]/|("(?:[^\\"]+|\\.)*")@ defined($1) ? $1 : " " @sge;
+        s@/[*].*|("(?:[^\\"]+|\\.)*")@ $is_comment = 1 if !defined($1); defined($1) ? $1 : "" @sge;
+      } else {  # Easier.
+        s@/[*].*?[*]/@ @sg;  # !!! TODO(pts): Parse .string "/*"
+        $is_comment = 1 if s@/[*].*@@s;  # Start of multiline comment.
+      }
+    }
     s@\A[\s;]+@@;
     s@[\s;]+\Z(?!\n)@@;
     if (!m@"@) {
@@ -417,10 +424,18 @@ sub as2nasm($$$$$$$$) {
         # Just ignore it.
         $_ = "";
       } else {
-        s@;.*@@s;
-        ++$errc;
-        # TODO(pts): Support multiple instructions per line.
-        print STDERR "error: multiple instructions per line, all but the first ignored ($lc): $_\n";
+        my $has_err = 0;
+        if (m@"@) {
+          s@;.*|("(?:[^\\"]+|\\.)*")@ $has_err = 1 if !defined($1); defined($1) ? $1 : "" @sge;
+        } else {
+          s@;.*@@s;
+          $has_err = 1;
+        }
+        if ($has_err) {
+          ++$errc;
+          # TODO(pts): Support multiple instructions per line.
+          print STDERR "error: multiple instructions per line, all but the first ignored ($lc): $_\n";
+        }
       }
     }
     next if !length($_);

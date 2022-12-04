@@ -278,7 +278,7 @@ sub print_nasm_header($$$$$) {
   section .bss align=$data_alignment
   %macro _end 0
   %endm
-  %macro kcall 2
+  %macro kcall 2  ; as2nasm doesn't generate such kcall instuctions, but some .nasm sources may have them.
   extern %1  ; Example %1: __imp__WriteFile\@20
   call [%1]
   %endm

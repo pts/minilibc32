@@ -266,7 +266,23 @@ bits 0  ; Enforce the error in NASM 0.98.* and 0.99.*.
 %assign _PROG_CPU_BITS _PROG_BITS
 %if _PROG_BITS == 32
 %ifidn %2,Linux
-%assign _ELF_SECT_NX_RO_MASK 2  ; As a workaround, make .data and .rodata writeable. (gcc makes .rodata executable instead.)
+; Linux i386 (kernel 5.4.0, amd64) doesn't support read-no-execute (r--)
+; pages, not even with modern CPUs and PAE. (Linux amd64 supports
+; read-no-execute (r--).) read-write (rw-) and read-write-execute (rwx)
+; pages. So we have to map .rodata (which would naturally be r--) to
+; read-execute (r-x) or read-write (rw-). We do read-write (rw-), just like
+; OpenWatcom (which only emits .text and .data ELF sections, merging .rodata
+; to .data), and unlike GCC and GNU ld (which merge the contents of .rodata
+; and .text to a single r-x ELF PT_LOAD program header).
+;
+; Here, as a workaround, we implement merging .rodata and .data by
+; specifying -w- (2) in _ELF_SECT_NX_RO_MASK, which will add -w- to all
+; non-executable sections, i.e. .rodata (and .data, which already has -w-).
+;
+; TODO(pts): Introduce a flag to _elf_start to merge .rodata to .text instead,
+; which would specify _ELF_SECT_NX_RO_MASK as 1 (--x) here. However, the actual
+; merging code also has to be written.
+%assign _ELF_SECT_NX_RO_MASK 2
 %define _ELF_ORG 0x08048000  ; GCC default on Linux.
 %elifidn %2,xv6
 %define _ELF_ORG 0  ; xv6 default.

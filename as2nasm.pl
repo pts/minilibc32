@@ -875,9 +875,15 @@ sub wasm2nasm($$$$$$) {
         my $label = $1;
         $_ = "kcall __imp__$1$2, '$1'";  # Example: kcall __imp__GetStdHandle@4, 'GetStdHandle'
       } else {
-        s@([\s,])(byte|word|dword) ptr (?:([^\[\],\s]*)\[(.*?)\]|FLAT:([^,]+))@
-            my $dspl = length($3) ? "+$3" : "";
-            "$1$2 " . (defined($3) ? "[$4$dspl]" : "[\$$5]") @ge;
+        s`([\s,])(byte|word|dword) ptr (?:([^\[\],\s]*)\[(.*?)\]|FLAT:([^,]+))`
+            if (defined($3)) {
+              my $p = "$1$2 [$4"; my $displacement = $3;
+              if (length($displacement)) {
+                $p .= "+" if $displacement !~ m@\A-(?:0[xX][0-9a-fA-F]+|[0-9][0-9a-fA-F]*[hH]|0|[1-9]\d*)\Z(?!\n)@;
+                $p .= $displacement;
+              }
+              $p .= "]"
+            } else { "$1$2 [\$$5]" } `ge;
         s@([\s,])([^\[\],\s]+)\[(.*?)\]@${1}[$3+$2]@g;  # `cmp al, 42[esi]'   -->  `cmp al, [esi+42]'.
         s@([-+])FLAT:([^,]+)@$1\$$2@g;
         s@([\s:\[\],+\-*/()<>])offset (?:FLAT:)?([^\s,+\-\[\]*/()<>]+)@$1\$$2@g;

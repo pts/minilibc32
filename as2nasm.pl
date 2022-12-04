@@ -425,10 +425,13 @@ sub as2nasm($$$$$$$$$) {
       s@\s+|("(?:[^\\"]+|\\.)*")@ defined($1) ? $1 : " " @ge;  # Keep quoted spaces intact.
     }
     if (m@;@) {
-      if (m@\A[.]def [^\s:,;]+ *; *[.]scl @) {
+      if (m@\A[.]def ([^\s:,;]+) *; *[.]scl (?:(\d+)[; ])?@) {
         # Example from MinGW: .def	_mainCRTStartup;	.scl	2;	.type	32;	.endef
-        # Just ignore it.
-        $_ = "";
+        if (defined($2) and $2 eq "2") {
+          $_ = "";  # Global or extern symbol $1, keep it.
+        } else {
+          $_ = ".type $1," if !defined($2) or $2 ne "2";  # Will make it implicitly local below.
+        }
       } else {
         my $has_err = 0;
         if (m@"@) {
@@ -474,11 +477,44 @@ sub as2nasm($$$$$$$$$) {
       }
     }
     if (m@\A[.]@) {
-      if (m@\A[.](?:file "|size |type |loc |cfi_|ident ")@) {
+      if (m@\A[.](?:file "|size |loc |cfi_|ident ")@) {
         # Ignore this directive (.file, .size, .type).
       } elsif (m@\A([.](?:text|data|rodata))\Z@) {
         $section = $1;
         print $outfh "section $section\n";
+      } elsif (m@\A[.]type ([^\s:,]+),.*\Z@) {  # Example: .type main, @function
+        # If there is a .def or .type before a .globl for that label, then
+        # declare it as local.
+        my $label = fix_label($1, \@bad_labels, $used_labels, \%local_labels, 1);
+        if (exists($defined_labels{$label})) {
+          ++$errc;
+          print STDERR "error: label defined before implicit local ($lc): $label\n";
+        }
+        if ($label =~ m@\AL_@) {
+          ++$errc;
+          print STDERR "error: local-prefix label cannot be declared implicit local ($lc): $label\n";
+        } elsif ($label =~ m@\A__imp__@) {
+          ++$errc;
+          print STDERR "error: __imp__-prefix label cannot be declared implicit local ($lc): $label\n";
+        } elsif (exists($global_labels{$label}) or exists($externs{$label})) {  # Must start with F_ or __imp__.
+          # No-op.
+        } elsif ($label =~ m@\AF_@ and exists($used_labels->{$label})) {
+          my $label2 = $label;
+          die if $label2 !~ s@\AF_@S_@;
+          $define_when_defined->{$label2} = $label;
+          if (exists($defined_labels{$label2})) {
+            print $outfh "$label equ $label2\n";
+            $defined_labels{$label} = 1;
+          } else {
+            # TODO(pts): Do an initial scanning pass to avoid this workaround. The workaround won't work for multiple input files with conflicting local labels.
+            $define_when_defined->{$label2} = $label;
+          }
+          $local_labels{$label2} = 1;
+          $used_labels->{$label2} = 1;
+        } else {
+          die "fatal: assert: bad implicit local label: $label\n" if $label !~ s@\A[FS]_@S_@;
+          $local_labels{$label} = 1;
+        }
       } elsif (m@\A[.]globl ([^\s:,]+)\Z@) {
         # GCC 7.5.0 emits `.globl __udivdi3', but no `.globl' for other
         # extern functions. So in the NASM output we end up with both

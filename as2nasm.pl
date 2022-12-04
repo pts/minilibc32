@@ -12,6 +12,9 @@ eval 'PERL_BADLANG=x;export PERL_BADLANG;exec perl -x "$0" "$@";exit 1'
 # !! Treat nasm warnings as errors (everything on stderr).
 # !! Support `gcc -masm=intel' and `clang --x86-asm-syntax=intel'.
 # !! What does it mean? .section        .text.unlikely,"ax",@progbits
+# !! Ignore WASM debug info (owcc -g) in .wasm source file.
+# !! Ignore GCC debug info in GNU as source files.
+# !! support this (GCC 12.2 -- on non-ELF?): .bss; .align 4; myvar: .zero 4
 #
 # ./as2nasm.pl -march=i386 -o t.nasm mininasm.gcc75.s ^^ nasm -O19 -f elf -o t.o t.nasm && ld --fatal-warnings -s -m elf_i386 -o t.prog t.o && sstrip t.prog && ls -ld t.prog && ./t.prog
 # ./as2nasm.pl -march=i386 -o t.nasm mininasm.gcc75.s && nasm -O19 -f bin -o t.prog t.nasm && chmod +x t.prog && ls -ld t.prog && ./t.prog
@@ -1007,6 +1010,8 @@ sub detect_source_format($$$) {
     $$last_line_ref = $_;
     if (!m@\S@) {
     } elsif (m@\A\s*[.](?:text|file)(?:\s|/[*])@ or m@\s*/[*]@) {
+      # !! TODO(pts): Detect C source file after end of the comment.
+      # !! TODO(pts): Does GNU as support // as comment?
       return "as";
     } elsif (m@\A\s*[.](?:model\s|38[67])@i) {
       return "wasm";

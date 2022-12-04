@@ -451,7 +451,10 @@ sub as2nasm($$$$$$$$$) {
         ++$errc;
         print STDERR "error: label outside section ($lc): $_\n";
       }
-      my $label = fix_label($1, \@bad_labels, $used_labels, \%local_labels);
+      my $label = $1;
+      # GCC 7.5.0 without `-fno-unwind-tables -fno-asynchronous-unwind-tables' emits .LFB0: ... .LFE0: for functions. We don't need these labels.
+      next if $label =~ m@\A[.]LF[BE]@;
+      $label = fix_label($label, \@bad_labels, $used_labels, \%local_labels);
       if (length($section) == 1) {
         if ($label =~ m@\A(?:L_C|F_LC)@) {  # Label for string literal, e.g. .LC0 (GCC 7.5 on Linux) or LC0 (MinGW GCC 4.8.2).
           push @$rodata_strs, "$label:";
@@ -477,6 +480,10 @@ sub as2nasm($$$$$$$$$) {
         $section = $1;
         print $outfh "section $section\n";
       } elsif (m@\A[.]globl ([^\s:,]+)\Z@) {
+        # GCC 7.5.0 emits `.globl __udivdi3', but no `.globl' for other
+        # extern functions. So in the NASM output we end up with both
+        # `global __udivdi3' and `extern __udivdi3'. That's fine, even for
+        # `nasm -f elf'.
         my $label = fix_label($1, \@bad_labels, $used_labels, \%local_labels);
         print $outfh "global $label\n";
         print $outfh "global _start\n" if $label eq "F__start" or $label eq "F__mainCRTStartup";  # !! TODO(pts): Indicate the entry point smarter.

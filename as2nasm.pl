@@ -31,6 +31,8 @@ use strict;
 # (`label:' and `db: ...') in `section .rodata.str1.1' (GCC, GNU as; already
 # converted to db) or `CONST SEGMENT' (OpenWatcom WASM). It will be cleared
 # as a side effect.
+#
+# TODO(pts): Deduplicate strings in .nasm source as well.
 sub print_merged_strings_in_strdata($$$) {
   my($outfh, $rodata_strs, $is_db_canonical_gnu_as) = @_;
   return if !$rodata_strs or !@$rodata_strs;
@@ -60,7 +62,7 @@ sub print_merged_strings_in_strdata($$$) {
             ($v >= 32 and $v <= 126 and $v != 0x27) ? "'" . chr($v) . "'" : $v
           } elsif (defined($7)) { $ofs += length($7) - 2; $7 }
           elsif (defined($8)) { ", " }
-          else { print STDERR "($9)"; $has_error = 1; "" }
+          else { $has_error = 1; "" }
         @ge;
         die "fatal: arg: syntax error in string literal db: $str0\n" if $has_error;
         #$str =~ s@', '@@g;  # This is incorrect, e.g. db 1, ', ', 2
@@ -163,7 +165,7 @@ sub print_merged_strings_in_strdata($$$) {
       my $ofs = $lofs - $oldofss[$i] + $ofss[$i];
       for (; $pi < $i; ++$pi) {
         #print STDERR "$rodata_strs->[$pi]\n" if !exists($mapi{$pi});
-        print $outfh $rodata_strs->[$pi] if !exists($mapi{$pi});
+        print $outfh "\t\t", $rodata_strs->[$pi] if !exists($mapi{$pi});
       }
       if ($lofs != $oldofss[$i] or exists($mapi{$i})) {
         if (exists($mapi{$i})) {
@@ -182,7 +184,7 @@ sub print_merged_strings_in_strdata($$$) {
     }
     for (; $pi < @$rodata_strs; ++$pi) {
       #print STDERR "$rodata_strs->[$pi]\n" if !exists($mapi{$pi});
-      print $outfh $rodata_strs->[$pi] if !exists($mapi{$pi});
+      print $outfh "\t\t", $rodata_strs->[$pi] if !exists($mapi{$pi});
     }
   }
   @$rodata_strs = ();
@@ -592,7 +594,7 @@ sub as2nasm($$$$$$$$) {
           print STDERR "error: .$inst1 outside section ($lc): $_\n";
         }
         my $inst = $inst1 eq "byte" ? "db" : $inst1 eq "value" ? "dw" : $inst1 eq "long" ? "dd" : "d?";
-        print $outfh "$inst $expr\n";
+        print $outfh "\t\t$inst $expr\n";
       } elsif (m@\A[.]((string)|ascii) "((?:[^\\"]+|\\.)*)"\Z@s) {
         my($inst1, $inst2, $data) = ($1, $2, $3);
         if (!length($section)) {
@@ -615,7 +617,7 @@ sub as2nasm($$$$$$$$) {
           if (length($section) == 1) {
             push @$rodata_strs, "db $data";
           } else {
-            print $outfh "db $data\n";
+            print $outfh "\t\tdb $data\n";
           }
         }
       } else {
@@ -751,7 +753,7 @@ sub as2nasm($$$$$$$$) {
       # register argument, e.g. convert `mov word ax, 1' to `mov ax, 1'.
       $instwd = "" if @args and length($instwd) and @args <= 2 and (
           exists($gp_regs{$args[0]}) or (@args == 2 and !defined($arg1_prefix) and exists($gp_regs{$args[1]})));
-      print $outfh "$inst$instwd$args\n";
+      print $outfh "\t\t$inst$instwd$args\n";
     } elsif (!length($_)) {
     } elsif ($_ eq "#APP" or $_ eq "#NO_APP") {  # Ignore, preprocessor enable/disabled.
       # https://stackoverflow.com/a/73317832
@@ -851,7 +853,7 @@ sub wasm2nasm($$$$$$) {
       if ($rodata_strs and $segment eq "CONST") {  # C string literals.
         push @$rodata_strs, $_;
       } else {
-        print $outfh "$_\n";
+        print $outfh "\t\t$_\n";
       }
     } elsif (m@^[.]@) {
       if ($_ eq ".387" or $_ eq ".model flat") {  # Ignore.

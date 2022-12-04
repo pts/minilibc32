@@ -72,6 +72,45 @@ __extension__ extern long long __attribute__((regparm(0))) __divdi3(long long a,
 __extension__ extern long long __attribute__((regparm(0))) __moddi3(long long a, long long b);
 #endif
 
+/* --- ABI detection (abitest): regparm(0) vs regparm(3). */
+
+#ifdef __GNUC__
+#if 0
+/* Predeclare to make sure that default -mregparm=... is used for main(...)
+ * as regparm(...). This protects against an explicit
+ * `__attribute__((regparm(...))) int main(...) { ... }'.
+ *
+ * We don't do it, because it would prevent `int main(void) { ... }' from
+ * working.
+ */
+extern int main(int argc, char **argv);
+#endif
+
+/* To check which -mregparm=0 ... -regparm=3 was used for compilation,
+ * irrespective of the GCC optimization level: If there is a `sub esp, sv'
+ * instruction, remember sv. Othervise let sv be 0. Count the number of
+ * [esp+...] (only displacements larger than sv) and [ebp+...] (only
+ * positive displacements) effective addresses in the function code: c. Then
+ * the regparm value is (3 - c).
+ */
+__attribute__((used)) static int __abitest_retsum(int a1, int a2, int a3) { return a1 + a2 + a3; }
+/* To check which regparm(...) value GCC is using for calling __divdi3,
+ * distinguishing between 0 and 3, irrespective of the GCC optimization
+ * level: Check the block of `push' and `mov' instructions preceding the
+ * `call __divdi3' instruction. If there are 4 `push [ebp+...]' or `push
+ * [ebp+...]' instructions, then it's regparm(0). Otherwise, if there are 2
+ * `push [ebp+...]' or `push [esp+...]' instructions and a `mov eax,
+ * [...+...]' and a `mov edx, [...+...]' then it's regparm(3). Otherwise the
+ * detection has failed.
+ *
+ * As a side effect, this code adds `.globl __divdi3' to the assembly
+ * source code, making this object file unnecessarily depend on __divdi3. A
+ * specialized linker can get easily rid of this reference (and
+ * __abitest_divdi3 itself).
+ */
+__extension__ __attribute__((used)) __attribute__((regparm(0))) static long long __abitest_divdi3(long long a, long long b) { return a / b; }
+#endif
+
 /* --- <stdarg.h> */
 
 #ifdef __GNUC__  /* !!! Also copy from __WATCOMC__ */

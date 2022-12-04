@@ -271,7 +271,7 @@ sub print_nasm_header($$$$$) {
   %define _PE_PROG_CPU_UNCHANGED
   _pe_start 32, $data_alignment|sect_many|console
 %endif
-\n);
+);
   } else {
     print $outfh qq(
 %ifidn __OUTPUT_FORMAT__, elf  ; Make it work without elf.inc.nasm.
@@ -290,8 +290,9 @@ sub print_nasm_header($$$$$) {
   %define _ELF_PROG_CPU_UNCHANGED
   _elf_start 32, Linux, $data_alignment|sect_many|shentsize
 %endif
-\n);
+);
   }
+  print $outfh qq(%macro _abi 2\n%endm\n);
   # After elf.inc.nasm, because it may modify the CPU level.
   my $cpulevel_str = ($cpulevel > 6 ? "" : $cpulevel >= 3 ? "${cpulevel}86" : "386");  # "prescott" would also work for $cpulevel > 6;
   print $outfh "cpu $cpulevel_str\n" if length($cpulevel_str);
@@ -335,6 +336,8 @@ my %special_arg_insts = (map { $_ => 1 } qw(bound enter lcall ljmp in out nop
 my %reg32_to_index = ('eax' => 0, 'ecx' => 1, 'edx' => 2, 'ebx' => 3, 'esp' => 4, 'ebp' => 5, 'esi' => 6, 'edi' => 7);
 
 my %as_string_escape1 = ("b" => "\x08", "f" => "\x0c", "n" => "\x0a", "r" => "\x0d", "t" => "\x09", "v" => "\x0b");
+
+my %divdi3_labels = map { $_ => 1 } qw(F___divdi3 F___udivdi3 F___moddi3 F___umoddi3);
 
 sub fix_label($$$$;$) {
   my($label, $bad_labels, $used_labels, $local_labels, $skip_mark_as_used) = @_;
@@ -383,6 +386,92 @@ sub fix_reg($) {
   $reg
 }
 
+sub process_abitest($$$$) {
+  my($outfh, $name, $insts, $lc) = @_;
+  if ($name eq "retsum") {
+    # To check which -mregparm=0 ... -regparm=3 was used for compilation,
+    # irrespective of the GCC optimization level: If there is a `sub esp, sv'
+    # instruction, remember sv. Othervise let sv be 0. Count the number of
+    # [esp+...] (only displacements larger than sv) and [ebp+...] (only
+    # positive displacements) effective addresses in the function code: c. Then
+    # the regparm value is (3 - c).
+    #
+    # __attribute__((used)) static int __abitest_retsum(int a1, int a2, int a3) { return a1 + a2 + a3; }
+    my $addc = 0;
+    for my $inst (@$insts) {
+      ++$addc if $inst =~ m@\A\t*add (?!esp,)@;
+    }
+    if ($addc != 2) {
+      print STDERR "error: expected 2 adds in abitest $name ($lc): $name\n";
+      return 1;
+    }
+    my $c3 = 3;
+    my $sv = 0;
+    for my $inst (@$insts) {
+      if ($inst =~ m@\A\t*sub esp, (0|[1-9]\d*|([^\[]]))$@) {  # TODO(pts): Hex etc.
+        if (defined($2)) { $c3 = -1 }  # Immediate is not decimal.
+        else { $sv += $1 }
+      } elsif ($inst =~ m@\[e([sb])p[+](?!-)(?:(0|[1-9]\d*)\])?@) {
+        if (defined($2)) { --$c3 if $2 > ($1 eq "s" ? $sv : 0) }
+        else { $c3 = -1 }  # Displacement is not decimal.
+      }
+    }
+    if ($c3 >= 0 and $c3 <= 3) {
+      print $outfh "_abi cc, rp$c3\n";  # Example meaning regparm(3) calling convention: __abitest cc, rp3
+    } else {
+      print STDERR "error: abitest $name failed ($lc)\n";
+      return 1;
+    }
+  } elsif ($name eq "divdi3") {
+    # To check which regparm(...) value GCC is using for calling __divdi3,
+    # distinguishing between 0 and 3, irrespective of the GCC optimization
+    # level: Check the block of `push' and `mov' instructions preceding the
+    # `call __divdi3' instruction. If there are 4 `push [ebp+...]' or `push
+    # [esp+...]' instructions, then it's regparm(0). Otherwise, if there are 2
+    # `push [ebp+...]' or `push [esp+...]' instructions and a `mov eax,
+    # [...+...]' and a `mov edx, [...+...]' then it's regparm(3). Otherwise the
+    # detection has failed. The actual rule implemented is a bit more complex,
+    # to support different code generation.
+    #
+    # __extension__ __attribute__((used)) __attribute__((regparm(0))) static long long __abitest_divdi3(long long a, long long b) { return a / b; }
+    my $i = @$insts;
+    --$i while $i > 0 and $insts->[$i - 1] !~ m@\A\t*call __+divdi3\Z@;
+    if ($i == 0) {
+      print STDERR "error: missing call to __divdi3 in abitest $name ($lc)\n";
+      return 1;
+    }
+    --$i;
+    #print STDERR "divdi3_insts=(@$insts)\n";
+    my $movc = 0; my $pushc = 0;
+    while ($i > 0) {
+      if ($insts->[$i - 1] =~ m@\A\t*mov e[ad]x, \[e[bs]p+(?!-)@) {
+        ++$movc;
+        --$i;
+      } elsif ($insts->[$i - 1] =~ m@\A\t*mov \[esp(?:[+](?:0|[1-9]\d*))?\],@) {
+        ++$pushc;
+        --$i;
+      } elsif ($insts->[$i - 1] =~ m@\A\t*(?:push (?:dword )?\[e[bs]p[+](?!-)|(mov) e[ad]x,)@) {
+        --$i;
+        defined($1) ? ++$movc : ++$pushc;
+      } else {
+        last
+      }
+    }
+    if ($movc >= 2 and $pushc == 2) {
+      print $outfh "_abi cc_divdi3, rp3\n";
+    } elsif ($pushc == 4) {
+      print $outfh "_abi cc_divdi3, rp0\n";
+    } else {
+      print STDERR "error: abitest $name failed: movc=$movc pushc=$pushc ($lc)\n";
+      return 1;
+    }
+  } else {
+    print STDERR "error: unknown abitest $name, please update libc.h ($lc): $name\n";
+    return 1;
+  }
+  0
+}
+
 # Converts GNU as syntax to NASM 0.98.39 syntax, Supports only a small
 # subset of GNU as syntax, mostly the one generated by GCC, but some
 # hand-written .as files also work.
@@ -395,6 +484,7 @@ sub as2nasm($$$$$$$$$) {
   my $is_comment = 0;
   my $do_omit_call_to___main = 0;
   my $section = ".text";
+  my @abitest_insts;  # Label and list of instructions being buffered.
   my $used_labels = {};
   my %defined_labels;
   my %externs;
@@ -467,6 +557,9 @@ sub as2nasm($$$$$$$$$) {
           $section = ".rodata";
           print $outfh "$label:\n";
         }
+      } elsif ($label =~ m@\A[SF]___+abitest_(.*)\Z@ and $section eq ".text") {  # Emitted by libc.h. Typically it's S_ because of static.
+        @abitest_insts = ($1);
+        $defined_labels{$label} = 1;
       } else {
         print $outfh "$label:\n";
         print $outfh "_start:\n" if $label eq "F__start" or $label eq "F__mainCRTStartup";  # !! TODO(pts): Indicate the entry point smarter.
@@ -479,6 +572,13 @@ sub as2nasm($$$$$$$$$) {
       }
     }
     if (m@\A[.]@) {
+      if (@abitest_insts) {
+        if (!m@[.]cfi_@) {
+          ++$errc;
+          print STDERR "error: incomplete abitest ($lc): $_\n";
+          @abitest_insts = ();
+        }
+      }
       if (m@\A[.](?:file "|size |loc |cfi_|ident ")@) {
         # Ignore this directive (.file, .size, .type).
       } elsif (m@\A([.](?:text|data|rodata))\Z@) {
@@ -523,7 +623,7 @@ sub as2nasm($$$$$$$$$) {
         # `global __udivdi3' and `extern __udivdi3'. That's fine, even for
         # `nasm -f elf'.
         my $label = fix_label($1, \@bad_labels, $used_labels, \%local_labels, 1);
-        print $outfh "global $label\n";
+        print $outfh "global $label\n" if !exists($divdi3_labels{$label});
         print $outfh "global _start\n" if $label eq "F__start" or $label eq "F__mainCRTStartup";  # !! TODO(pts): Indicate the entry point smarter.
         if (exists($defined_labels{$label})) {
           ++$errc;
@@ -779,6 +879,9 @@ sub as2nasm($$$$$$$$$) {
            }
         } elsif ($do_omit_call_to___main and $inst eq "call" and $_ eq "___main") {
           next;  # Just omit it, argc and argv re already fine.
+        } elsif (@abitest_insts and $inst eq "call") {
+          push @abitest_insts, "\t\tcall $_\n";
+          next;  # Don't do $used_labels{$label} = 1.
         } elsif (!m@\A[\$]@) { s@\A@\$@ }  # Relative immediate syntax for `jmp short' or `jmp near'.
       }
       pos($_) = 0;
@@ -855,7 +958,18 @@ sub as2nasm($$$$$$$$$) {
       # register argument, e.g. convert `mov word ax, 1' to `mov ax, 1'.
       $instwd = "" if @args and length($instwd) and @args <= 2 and (
           exists($gp_regs{$args[0]}) or (@args == 2 and !defined($arg1_prefix) and exists($gp_regs{$args[1]})));
-      print $outfh "\t\t$inst$instwd$args\n";
+      $_ = "\t\t$inst$instwd$args\n";
+      if (@abitest_insts) {
+        if ($inst eq "ret") {
+          my $abitest_name = shift(@abitest_insts);
+          $errc += process_abitest($outfh, $abitest_name, \@abitest_insts, $lc);
+          @abitest_insts = ();
+        } else {
+          push @abitest_insts, $_;
+        }
+      } else {
+        print $outfh $_;
+      }
     } elsif (!length($_)) {
     } elsif ($_ eq "#APP" or $_ eq "#NO_APP") {  # Ignore, preprocessor enable/disabled.
       # https://stackoverflow.com/a/73317832
@@ -868,6 +982,10 @@ sub as2nasm($$$$$$$$$) {
       ++$errc;
       print STDERR "error: bad label syntax ($lc): $label\n";
     }
+  }
+  if (@abitest_insts) {
+    ++$errc;
+    print STDERR "error: incomplete abitest ($lc): $_\n";
   }
   if (0 and $rodata_strs and @$rodata_strs) {  # For debugging: don't merge (optimize) anything.
     $section = ".rodata";

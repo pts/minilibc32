@@ -603,29 +603,34 @@ sub as2nasm($$$$$$$$) {
         }
         my $inst = $inst1 eq "byte" ? "db" : $inst1 eq "value" ? "dw" : $inst1 eq "long" ? "dd" : "d?";
         print $outfh "\t\t$inst $expr\n";
-      } elsif (m@\A[.]((string)|ascii) "((?:[^\\"]+|\\.)*)"\Z@s) {
-        my($inst1, $inst2, $data) = ($1, $2, $3);
-        if (!length($section)) {
+      } elsif (m@\A[.]((string)|ascii)(?=\Z|\s)(?:\s+"((?:[^\\"]+|\\.)*)"\s*\Z)?@s) {
+        if (!defined($3)) {
           ++$errc;
-          print STDERR "error: .$inst1 outside section ($lc): $_\n";
-        }
-        # GNU as 2.30 does the escaping like this.
-        $data =~ s@\\(?:([0-3][0-7]{2})|[xX]([0-9a-fA-F]{1,})|([bfnrtv])|(.))@
-            defined($1) ? chr(oct($1) & 255) :
-            defined($2) ? chr(hex(substr($2, -2)) & 255) :
-            defined($3) ? $as_string_escape1{$3} :
-            $4 @ges;
-        $data .= "\0" if defined($inst2);
-        if (length($data)) {
-          $data =~ s@([\x00-\x1f\\'\x7f-\xff])@ sprintf("', %d, '", ord($1)) @ges;
-          $data = "'$data'";
-          $data =~ s@, ''(?=, )@@g;  # Optimization.
-          $data =~ s@\A'', @@;  # Optimization.
-          $data =~ s@, ''\Z@@;  # Optimization.
-          if (length($section) == 1) {
-            push @$rodata_strs, "db $data";
-          } else {
-            print $outfh "\t\tdb $data\n";
+          print STDERR "error: bad $1 argument ($lc): $_\n";
+        } else {
+          my($inst1, $inst2, $data) = ($1, $2, $3);
+          if (!length($section)) {
+            ++$errc;
+            print STDERR "error: .$inst1 outside section ($lc): $_\n";
+          }
+          # GNU as 2.30 does the escaping like this.
+          $data =~ s@\\(?:([0-3][0-7]{2}|[0-7][0-7]?)|[xX]([0-9a-fA-F]{1,})|([bfnrtv])|(.))@
+              defined($1) ? chr(oct($1) & 255) :
+              defined($2) ? chr(hex(substr($2, -2)) & 255) :
+              defined($3) ? $as_string_escape1{$3} :
+              $4 @ges;
+          $data .= "\0" if defined($inst2);
+          if (length($data)) {
+            $data =~ s@([\x00-\x1f\\'\x7f-\xff])@ sprintf("', %d, '", ord($1)) @ges;
+            $data = "'$data'";
+            $data =~ s@, ''(?=, )@@g;  # Optimization.
+            $data =~ s@\A'', @@;  # Optimization.
+            $data =~ s@, ''\Z@@;  # Optimization.
+            if (length($section) == 1) {
+              push @$rodata_strs, "db $data";
+            } else {
+              print $outfh "\t\tdb $data\n";
+            }
           }
         }
       } else {

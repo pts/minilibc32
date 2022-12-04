@@ -514,7 +514,8 @@ sub as2nasm($$$$$$$$) {
           $section = ".rodata";  # !! Any better? Move all after .rodata?
           print $outfh "section $section\n";
         }
-      } elsif (m@\A[.]section [.]rodata\Z@) {
+      } elsif (m@\A[.]section [.]ro?data(?:\Z|\s*,)@) {
+        # Example $_ for MinGW: .section .rdata,"dr"
         $section = ".rodata";
         print $outfh "section $section\n";
       } elsif (m@\A[.]section [.]note[.]GNU-stack[,]@) {

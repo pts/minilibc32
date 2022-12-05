@@ -36,7 +36,7 @@ static const char *format_ll_dec(long long i) {
   return p;
 }
 
-#ifdef __GNUC__
+#if 0 && defined(__GNUC__)
 long long __attribute__((regparm(3))) call__moddi3(long long a, long long b) {
   return __moddi3(a, b);
 }

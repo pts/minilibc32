@@ -94,6 +94,7 @@ extern int main(int argc, char **argv);
  * the regparm value is (3 - c).
  */
 __attribute__((used)) static int __abitest_retsum(int a1, int a2, int a3) { return a1 + a2 + a3; }
+#ifndef __LIBC_OMIT_ABITEST_DIVDI3
 /* To check which regparm(...) value GCC is using for calling __divdi3,
  * distinguishing between 0 and 3, irrespective of the GCC optimization
  * level: Check the block of `push' and `mov' instructions preceding the
@@ -106,9 +107,11 @@ __attribute__((used)) static int __abitest_retsum(int a1, int a2, int a3) { retu
  * As a side effect, this code adds `.globl __divdi3' to the assembly
  * source code, making this object file unnecessarily depend on __divdi3. A
  * specialized linker can get easily rid of this reference (and
- * __abitest_divdi3 itself).
+ * __abitest_divdi3 itself). To omit it manually, specify
+ * `gcc -D__LIBC_OMIT_ABITEST_DIVDI3'.
  */
 __extension__ __attribute__((used)) __attribute__((regparm(0))) static long long __abitest_divdi3(long long a, long long b) { return a / b; }
+#endif
 #endif
 
 #ifdef __WATCOMC__

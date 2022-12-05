@@ -51,7 +51,7 @@ owcc -blinux -fnostdlib -Os -s -fno-stack-check -march=i386 -W -Wall -Wextra -We
 #
 # GCC -m... and -f... flags are from
 # https://github.com/pts/pts-xtiny/blob/778a3353bd7313a9c0ec72a599b0a11ce72abbf6/xtiny#L819-L862
-GCCFLAGS='-m32 -mregparm=3 -fno-pic -fno-stack-protector -fomit-frame-pointer -fno-ident -ffreestanding -fno-builtin -fno-unwind-tables -fno-asynchronous-unwind-tables -nostdlib -nostdinc -Os -falign-functions=1 -mpreferred-stack-boundary=2 -falign-jumps=1 -falign-loops=1 -march=i386'
+GCCFLAGS='-D__LIBC_OMIT_ABITEST_DIVDI3 -m32 -mregparm=3 -fno-pic -fno-stack-protector -fomit-frame-pointer -fno-ident -ffreestanding -fno-builtin -fno-unwind-tables -fno-asynchronous-unwind-tables -nostdlib -nostdinc -Os -falign-functions=1 -mpreferred-stack-boundary=2 -falign-jumps=1 -falign-loops=1 -march=i386'
 $GCC -c $GCCFLAGS -ansi -pedantic -W -Wall -Werror=implicit-function-declaration -o test1gc.o test1.c
 $GCC -c $GCCFLAGS -ansi -pedantic -W -Wall -Werror=implicit-function-declaration -Wno-long-long -o test2gc.o test2.c
 # Do the linking separately, because gcc passes too many harmful flags to
@@ -64,5 +64,11 @@ test "$LD"
 
 # Compile program test_hello.ow with OpenWatcom (owcc).
 owcc -blinux -fnostdlib -o test_hello.ow -Os -s -fno-stack-check -march=i386 -W -Wall -Wextra -Werror test_hello.c minilibc32we.obj && $SSTRIP test_hello.ow
+
+# Manual tests:
+# $ ./test2ow 1234567890123456789 9876543210
+# 8626543209
+# $ ./test2gc 1234567890123456789 9876543210
+# 8626543209
 
 : "$O" OK.

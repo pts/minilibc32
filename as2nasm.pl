@@ -1444,6 +1444,15 @@ if ($outfmt eq "prog" or $outfmt eq "elfobj") {
     my %undefineds;
     my @undefineds;
     if ($do_extract_undefineds) {
+      # !! TODO(pts): Drop the F_ prefix from GNU as output, to make linking work:
+      # $ ./as2nasm.pl --nasm=nasm-0.98.39 -o hello32 hello32.s
+      # info: converting from GNU as to NASM syntax: hello32.s to hello32.tmp.nasm
+      # info: running nasm_link_cmd: nasm-0.98.39 -O999999999 -w+orphan-labels -f bin -D_PROG_NO_START -o hello32 hello32.tmp.nasm 2>hello32.tmp.nasmerr
+      # info: running NASM again to get symbols from libc: F_isxdigit__RP3__ F_write__RP3__ _start
+      # info: running nasm_link_libc_cmd: nasm-0.98.39 -O999999999 -w+orphan-labels -f bin -o hello32 hello32.tmp.nasmlibc
+      # hello32.tmp.nasm:46: error: symbol `F_isxdigit__RP3__' undefined
+      # hello32.tmp.nasm:49: error: symbol `F_write__RP3__' undefined
+      # minilibc32.nasm:535: error: symbol `main' undefined
       my $errfh;
       die "fatal: open $errfn: $!\n" if !open($errfh, "<", $errfn);
       my $do_hide_dots = 0;

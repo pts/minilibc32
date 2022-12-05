@@ -14,32 +14,58 @@
 ; All labels whose name ends with _ are functions with the __watcall calling
 ; convention. TODO(pts): Add alternative libc for `gcc -mregparm=3'.
 ;
-; The __watcall calling convention of OpenWatcom passes function arguments
-; in EAX, EDX, EBX, ECX, and expects the return value in EAX. The callee may
-; use EAX, the arithmetic flags in EFLAGS (but not DF, which is expected to
-; be 0 and must restored to 0) and all actual argument registers as scratch
-; registers, and it must restore everything else.
+; The watcall (__watcall) calling convention of OpenWatcom passes function
+; arguments in EAX, EDX, EBX, ECX, and expects the return value in EAX. The
+; callee may use EAX, the arithmetic flags in EFLAGS (but not DF, which is
+; expected to be 0 and must restored to 0) and all actual argument registers
+; as scratch registers, and it must restore everything else.
 ;
-; The regparm(3) calling convention of GCC passes up to 3 function arguments
-; in EAX, EDX, ECX (please note that ECX is different from __watcall), and
-; pushes the rest to the stack ([esp+4], [esp+8] etc.; [esp] is the return
-; address). The caller removes arguments from the stack. EAX, EBX and ECX
-; and EFLAGS (but not DF) are scratch registers, the callee has to restore
-; everything else.
+; The rp3 (__attribute__((regparm(3)))) calling convention of GCC passes up
+; to 3 function arguments in EAX, EDX, ECX (please note that ECX is
+; different from __watcall), and pushes the rest to the stack ([esp+4],
+; [esp+8] etc.; [esp] is the return address). The caller removes arguments
+; from the stack. EAX, EBX and ECX and EFLAGS (but not DF) are scratch
+; registers, the callee has to restore everything else.
 ;
 ; TODO(pts): Convert this NASM source to WASM and GNU as, and drop NASM as a
 ;     dependency. This is not a good idea (to drop), because NASM can link a
-;     smaller executable program.
-; TODO(pts): Add `long long' multiplication and division functions, for GCC
-;     and OpenWatcom.
+;     smaller executable program, see better_linker.txt how.
 ;
 
 		bits 32
 		cpu 386
 
-%ifdef __LIBC_WIN32
-%error 'This libc does not support Win32 yet.'  ; !! TODO(pts): Implement support.
-times -1 nop  ; Force error on NASM 0.98.39.
+;%ifdef __LIBC_WIN32
+;%error 'This libc does not support Win32 yet.'  ; !! TODO(pts): Implement support.
+;times -1 nop  ; Force error on NASM 0.98.39.
+;%endif
+
+; __LIBC_INCLUDED means that this .nasm source file is %included as part
+; of the linking of a specific executable program. For each libc function
+; needed, there will be a %define, e.g. `%define __LIBC_NEED_isxdigit_'
+; for the isxdigit(...) function in the watcall calling convention.
+%ifdef __LIBC_INCLUDED
+  %define __LIBC_INCLUDED 1
+  %define __LIBC_ENABLE_WE 1  ; write(...) + exit(...).
+  %define __LIBC_ENABLE_SYSCALL 1  ; Linux syscalls other than write(...) + exit(...).
+  %define __LIBC_ENABLE_GENERAL 1  ; Enable general (non-target-specific) functions.
+  %define __LIBC_ENABLE_INT64 1
+%else
+  %define __LIBC_INCLUDED 0
+  %define __LIBC_ENABLE_WE 2  ; write(...) + exit(...).
+  %ifdef FEATURES_WE  ; FEATURES_WE means write(...) + exit(...) only, for hello-world benchmark.
+    %define __LIBC_ENABLE_SYSCALL 0
+    %define __LIBC_ENABLE_GENERAL 0
+    %define __LIBC_ENABLE_INT64 0
+  %else
+    %define __LIBC_ENABLE_SYSCALL 2
+    %define __LIBC_ENABLE_GENERAL 2
+    %ifdef FEATURES_INT64
+      %define __LIBC_ENABLE_INT64 2
+    %else
+      %define __LIBC_ENABLE_INT64 0
+    %endif
+  %endif
 %endif
 
 %ifidn __OUTPUT_FORMAT__,obj  ; OpenWatcom segments.
@@ -52,7 +78,11 @@ times -1 nop  ; Force error on NASM 0.98.39.
 		section _TEXT
   %define __LIBC_BSS _BSS  ; Section name.
 %else
-  %ifndef __LIBC_INCLUDED
+  %if __LIBC_INCLUDED==0
+  ; __LIBC_INCLUDED means that this .nasm source file is %included as part
+  ; of the linking of a specific executable program. For each libc function
+  ; needed, there will be a %define, e.g. `%define __LIBC_NEED_isxdigit_'
+  ; for the isxdigit(...) function in the watcall calling convention.
 		section .bss align=4
 		section .text align=1
 		section .text
@@ -60,44 +90,179 @@ times -1 nop  ; Force error on NASM 0.98.39.
   %define __LIBC_BSS .bss  ; Section name.
 %endif
 
+%define SYM_RP3(name) name %+ __RP3__  ; GCC regparm(3) calling convention is indicated for minilibc32 GCC.
+%define SYM_WATCALL(name) name %+ _  ; OpenWatcom __watcall calling convention is indicated with a trailing `_' by OpenWatcom.
+
+%macro __LIBC_CC_rp3 0  ; GCC regparm(3) calling convention.
+  %define SYM(name) SYM_RP3(name)
+  %define REGARG3 ecx
+  %define REGNARG ebx  ; A register which is not used by the first 3 function arguments.
+%endm
+
+%macro __LIBC_CC_watcall 0  ; OpenWatcom __watcall calling convention.
+  %define SYM(name) SYM_WATCALL(name)
+  %define REGARG3 ebx
+  %define REGNARG ecx
+%endm
+
+%macro __LIBC_CC_rp3_and_watcall 0
+  %undef SYM
+  %undef REGARG3
+  %undef REGNARG
+%endm
+
+%define __LIBC_CC_EVIDENCE_rp3 1  ; Do we have strong evidence (e.g. abitest) that the regparm(3) (rather than regparm(0)) calling convention is used (especially for main(...))?
 %ifndef __LIBC_ABI_cc__val
+  %define __LIBC_CC_EVIDENCE_rp3 0
   %ifidn __OUTPUT_FORMAT__,elf  ; Guess GCC regparm(3) calling convention.
     %define __LIBC_ABI_cc__val rp3
-    %define __LIBC_ABI_cc_rp3
-  %else  ; Guess OpenWatcom __watcall calling convention.
+    ;%define __LIBC_ABI_cc_rp3
+  %else  ; Guess OpenWatcom __watcall calling convention, typically if __OUTPUT_FORMAT__ is obj or bin.
     %define __LIBC_ABI_cc__val watcall
-    %define __LIBC_ABI_cc_watcall
+    ;%define __LIBC_ABI_cc_watcall
   %endif
 %endif
 
-%ifidn __LIBC_ABI_cc__val,rp3  ; GCC regparm(3) calling convention.
-  %define SYM(name) name %+ __RP3__  ; GCC regparm(3) calling convention is indicated for minilibc32 GCC.
-  %define REGARG3 ecx
-  %define REGNARG ebx  ; A register which is not used by the first 3 function arguments.
-%elifidn __LIBC_ABI_cc__val,watcall  ; OpenWatcom __watcall calling convention.
-  %define SYM(name) name %+ _  ; OpenWatcom __watcall calling convention is indicated with a trailing `_' by OpenWatcom.
-  %define REGARG3 ebx
-  %define REGNARG ecx
+%define __LIBC_CC_IS_rp3 0
+%define __LIBC_CC_IS_watcall 0
+%ifidn __LIBC_ABI_cc__val,rp3
+  %define __LIBC_CC __LIBC_CC_rp3
+  %define __LIBC_CC_IS_rp3 1
+%elifidn __LIBC_ABI_cc__val,rp0  ; Uncommon, not recommended GCC.
+  %define __LIBC_CC_EVIDENCE_rp3 0
+  %define __LIBC_CC __LIBC_CC_rp3
+  %define __LIBC_CC_IS_rp3 1
+%elifidn __LIBC_ABI_cc__val,watcall
+  %define __LIBC_CC_EVIDENCE_rp3 0
+  %define __LIBC_CC __LIBC_CC_watcall
+  %define __LIBC_CC_IS_watcall 1
 %else
+  %define __LIBC_CC_EVIDENCE_rp3 0
+  ; TODO(pts): Implement rp0, supported by both GCC and OpenWatcom.
   %error 'Unknown calling convention for libc.'
   times -1 nop  ; Force error on NASM 0.98.39.
 %endif
+__LIBC_CC
+
+%macro __LIBC_FUNC 1  ; %1 is symname.
+global $%1
+$%1:
+%endm
+
+%macro __LIBC_CHECK_NEEDED_HELPER 2
+  %ifdef __LIBC_NEED_%1
+    %define __LIBC_IS_NEEDED_%2 1
+  %else
+    %define __LIBC_IS_NEEDED_%2 0
+  %endif
+%endm
+
+%macro __LIBC_CHECK_NEEDED 1-2  ; Workaround for NASM 0.98.39, see https://stackoverflow.com/a/74683036
+  __LIBC_CHECK_NEEDED_HELPER %1, asis_%2
+  __LIBC_CHECK_NEEDED_HELPER %1_, watcall_%2
+  __LIBC_CHECK_NEEDED_HELPER %1__RP3__, rp3_%2
+%endm
+
+
+%macro __LIBC_MAYBE_ADD 2
+  __LIBC_CHECK_NEEDED %1
+  %if (__LIBC_ENABLE_%2>1 && __LIBC_CC_IS_watcall) || __LIBC_IS_NEEDED_watcall_
+    __LIBC_CC_watcall
+    __LIBC_FUNC %1_
+    __LIBC_FUNC_%1
+  %endif
+  %if (__LIBC_ENABLE_%2>1 && __LIBC_CC_IS_rp3) || __LIBC_IS_NEEDED_rp3_
+    __LIBC_CC_rp3
+    __LIBC_FUNC %1__RP3__
+    __LIBC_FUNC_%1
+  %endif
+  __LIBC_CC
+%endm
+
+; TODO(pts): Undefine the macro __LIBC_FUNC_%1, or don't even define it.
+%macro __LIBC_MAYBE_ADD_SAME 2
+  __LIBC_CHECK_NEEDED %1
+  %if __LIBC_ENABLE_%2>1 || __LIBC_IS_NEEDED_watcall_ || __LIBC_IS_NEEDED_rp3_
+    __LIBC_CC_rp3_and_watcall
+    %if __LIBC_IS_NEEDED_watcall_ || __LIBC_ENABLE_%2>1
+      __LIBC_FUNC %1_
+    %endif
+    %if __LIBC_IS_NEEDED_rp3_ || __LIBC_ENABLE_%2>1
+      __LIBC_FUNC %1__RP3__
+    %endif
+    __LIBC_FUNC_%1
+  %endif
+  __LIBC_CC
+%endm
+
+; Add function %1 asis (no name mangling) if %1 is needed or
+; feature %2 is requested.
+%macro __LIBC_MAYBE_ADD_ASIS 2
+  __LIBC_CHECK_NEEDED %1
+  %if __LIBC_ENABLE_%2>1 || __LIBC_IS_NEEDED_asis_
+    __LIBC_CC_rp3_and_watcall
+    __LIBC_FUNC %1
+    __LIBC_FUNC_%1
+  %endif
+  __LIBC_CC
+%endm
+
+%macro __LIBC_MAYBE_ADD_ONE 1
+  __LIBC_CHECK_NEEDED %1
+  %if __LIBC_IS_NEEDED_watcall_ && __LIBC_CC_IS_watcall
+    __LIBC_CC_watcall
+    __LIBC_FUNC %1_
+    __LIBC_FUNC_%1
+    __LIBC_CC
+  %endif
+  %if __LIBC_IS_NEEDED_rp3_ && __LIBC_CC_IS_rp3
+    __LIBC_CC_rp3
+    __LIBC_FUNC %1__RP3__
+    __LIBC_FUNC_%1
+    __LIBC_CC
+  %endif
+%endm
+
+%macro __LIBC_ADD_DEP_HELPER 2  ; Workaround for NASM 0.98.39, see https://stackoverflow.com/a/74683036
+  %ifdef %1_
+    %define %2_
+  %endif
+  %ifdef %1__RP3__
+    %define %2__RP3__
+  %endif
+%endm
+
+; Example: __LIBC_ADD_DEP malloc, sys_brk
+;
+; If FA depends on FB, and FB depends on FC, then add them in this order:
+;
+;   __LIBC_ADD_DEP FA, FB
+;   __LIBC_ADD_DEP FB, FC
+;
+; After these, the order of __LIBC_MAYBE_ADD... doesn't matter.
+%macro __LIBC_ADD_DEP 2
+  __LIBC_ADD_DEP_HELPER __LIBC_NEED_%1, __LIBC_NEED_%2
+%endm
+
+%macro __LIBC_ADD_DEP_ASIS 2
+  %ifdef __LIBC_NEED_%1
+    %define __LIBC_NEED_%2
+  %endif
+%endm
 
 ; --- Generic i386 functions.
 
-%ifndef FEATURES_WE  ; FEATURES_WE means write(...) + exit(...) only, for hello-world benchmark.
-
-global SYM($isalpha)
-SYM($isalpha):
+%macro __LIBC_FUNC_isalpha 0
 		or al, 20h
 		sub al, 61h
 		cmp al, 1ah
 		sbb eax, eax
 		neg eax
 		ret
+%endm
+__LIBC_MAYBE_ADD_SAME isalpha, GENERAL
 
-global SYM($isspace)
-SYM($isspace):
+%macro __LIBC_FUNC_isspace 0
 		sub al, 9
 		cmp al, 5
 		jb .1
@@ -106,17 +271,19 @@ SYM($isspace):
 .1:		sbb eax, eax
 		neg eax
 		ret
+%endm
+__LIBC_MAYBE_ADD_SAME isspace, GENERAL
 
-global SYM($isdigit)
-SYM($isdigit):
+%macro __LIBC_FUNC_isdigit 0
 		sub al, 30h
 		cmp al, 0ah
 		sbb eax, eax
 		neg eax
 		ret
+%endm
+__LIBC_MAYBE_ADD_SAME isdigit, GENERAL
 
-global SYM($isxdigit)
-SYM($isxdigit):
+%macro __LIBC_FUNC_isxdigit 0
 		sub al, 30h
 		cmp al, 0ah
 		jb .2
@@ -126,9 +293,10 @@ SYM($isxdigit):
 .2:		sbb eax, eax
 		neg eax
 		ret
+%endm
+__LIBC_MAYBE_ADD_SAME isxdigit, GENERAL
 
-global SYM($strlen)
-SYM($strlen):
+%macro __LIBC_FUNC_strlen 0
 		push esi
 		xchg eax, esi
 		xor eax, eax
@@ -139,9 +307,10 @@ SYM($strlen):
 		jae .3
 		pop esi
 		ret
+%endm
+__LIBC_MAYBE_ADD_SAME strlen, GENERAL
 
-global SYM($strcpy)
-SYM($strcpy):
+%macro __LIBC_FUNC_strcpy 0
 		push edi
 		xchg esi, edx
 		xchg eax, edi
@@ -154,9 +323,10 @@ SYM($strcpy):
 		xchg esi, edx
 		pop edi
 		ret
+%endm
+__LIBC_MAYBE_ADD_SAME strcpy, GENERAL
 
-global SYM($strcmp)
-SYM($strcmp):
+%macro __LIBC_FUNC_strcmp 0
 		push esi
 		xchg eax, esi
 		xor eax, eax
@@ -173,9 +343,10 @@ SYM($strcmp):
 .7:		xchg edi, edx
 		pop esi
 		ret
+%endm
+__LIBC_MAYBE_ADD_SAME strcmp, GENERAL
 
-global SYM($memcpy)
-SYM($memcpy):
+%macro __LIBC_FUNC_memcpy 0
 		push edi
 		xchg esi, edx
 		xchg edi, eax		; EDI := dest; EAX := junk.
@@ -191,150 +362,19 @@ SYM($memcpy):
 		xchg esi, edx		; Restore ESI.
 		pop edi
 		ret
-
-%endif  ; ifndef FEATURES_WE
-
-; --- Linux i386 syscall (system call) functions.
-
-%ifndef FEATURES_WE
-
-global SYM($sys_brk)
-SYM($sys_brk):
-		push byte 45		; __NR_brk.
-		jmp short __do_syscall3
-
-global SYM($unlink)
-SYM($unlink):
-global SYM($remove)
-SYM($remove):
-		push byte 10		; __NR_unlink.
-		jmp short __do_syscall3
-
-global SYM($close)
-SYM($close):
-		push byte 6		; __NR_close.
-		jmp short __do_syscall3
-
-
-global SYM($creat)
-SYM($creat):
-		push byte 8		; __NR_creat.
-		jmp short __do_syscall3
-
-global SYM($rename)
-SYM($rename):
-		push byte 38		; __NR_rename.
-		jmp short __do_syscall3
-
-global SYM($open)
-SYM($open):  ; With 2 or 3 arguments, arg3 is mode.
-global SYM($open3)
-SYM($open3):  ; With 2 or 3 arguments, arg3 is mode.
-		push byte 5		; __NR_open.
-		jmp short __do_syscall3
-
-global SYM($read)
-SYM($read):
-		push byte 3		; __NR_read.
-		jmp short __do_syscall3
-
-global SYM($lseek)
-SYM($lseek):
-		push byte 19		; __NR_lseek.
-		jmp short __do_syscall3
-
-
-global SYM($chdir)
-SYM($chdir):
-		push byte 12		; __NR_chdir.
-		jmp short __do_syscall3
-
-global SYM($mkdir)
-SYM($mkdir):
-		push byte 39		; __NR_mkdir.
-		jmp short __do_syscall3
-
-global SYM($rmdir)
-SYM($rmdir):
-		push byte 40		; __NR_rmdir.
-		jmp short __do_syscall3
-
-global SYM($getpid)
-SYM($getpid):
-		push byte 20		; __NR_getpid.
-		jmp short __do_syscall3
-
-%endif  ; ifndef FEATURES_WE
-
-global SYM($write)
-SYM($write):
-		push byte 4		; __NR_write.
-		jmp short __do_syscall3
-
-; --- Entry and exit().
-
-global $_start
-%ifidn __OUTPUT_FORMAT__,obj
-extern SYM($main_from_libc)
-..start:
-%endif
-%ifidn __OUTPUT_FORMAT__,elf
-extern $main  ; No SYM(...), this is user-defined.
-%endif
-%ifidn __OUTPUT_FORMAT__,bin
-%ifndef __LIBC_INCLUDED
-SYM($main_from_libc) equ $$  ; Dummy value to avoid undefined symbols.
-%endif
-%endif
-$_start:  ; Program entry point.
-		pop eax			; argc.
-		mov edx, esp		; argv.
-%ifidn REGARG3,ebx  ; __watcall.
-		call SYM($main_from_libc)
-%else  ; regparm(3).
-		push edx  ; Make it also work if main(...) is regparm(0), e.g. `gcc' without `-mregparm=3'. TODO(pts): When can we be sure GCC was using regparm(3) thus remove these pushes? Do a little test on the gcc assembly output.
-		push eax
-		call $main
-%endif
-		; Fall through to exit_.
-global SYM($exit)
-SYM($exit):
-		push byte 1		; __NR_exit.
-__do_syscall3:	; Do system call of up to 3 argumnts: dword[esp]: syscall number, eax: arg1, edx: arg2, ebx: arg3.
-		xchg REGNARG, [esp]	; Keep REGNARG pushed.
-		xchg eax, ebx
-%ifidn REGARG3,ebx  ; __watcall.
-		xchg eax, edx
-		xchg eax, ecx
-%else  ; regparm(3).
-		xchg ecx, edx
-%endif
-		push edx
-		push REGARG3
-		int 80h
-		test eax, eax
-		jns .8
-		or eax, byte -1
-.8:		pop REGARG3
-		pop edx
-		pop REGNARG
-		ret
-		; This would also work, but it is longer:
-		;xchg eax, ebx
-		;xor eax, eax
-		;inc eax
-		;int 80h
-
+%endm
+__LIBC_MAYBE_ADD memcpy, GENERAL
 
 ; --- Functions using the Linux i386 syscalls.
 
 %ifndef FEATURES_WE
 
+%ifndef __LIBC_WIN32  ; TODO(pts): Implement support.
+
 ; Implemented using sys_brk(2).
-global SYM($malloc)
-SYM($malloc):
-		push ecx
-		push edx
+%macro __LIBC_FUNC_malloc 0
+		push ecx  ; !! TODO(pts): Not necessary to save+restore in rp3.
+		push edx  ; !! TODO(pts): Not necessary to save+restore in rp3.
 		mov edx, eax
 		test eax, eax
 		jg .14
@@ -380,20 +420,178 @@ SYM($malloc):
 .18:		pop edx
 		pop ecx
 		ret
+%endm
+__LIBC_ADD_DEP malloc, sys_brk  ; !! TODO(pts): Automatic, based on `call'.
+__LIBC_MAYBE_ADD malloc, GENERAL
+
+%endif  ; ifndef __LIBC_WIN32
 
 %endif  ; ifndef FEATURES_WE
 
+; --- Linux i386 syscall (system call) functions.
+
+; Example: __LIBC_LINUX_SYSCALL sys_brk, 45, SYSCALL
+;
+; Generates 4 bytes per syscall.
+%macro __LIBC_LINUX_SYSCALL 3
+  %ifndef __LIBC_WIN32  ; TODO(pts): Implement support.
+    __LIBC_CHECK_NEEDED %1
+    %if __LIBC_CC_IS_watcall && (__LIBC_ENABLE_%3>1 || __LIBC_IS_NEEDED_watcall_)
+      __LIBC_FUNC %1_
+      %define __LIBC_NEED___do_syscall3_
+      push byte %2
+      jmp short __do_syscall3_
+    %endif
+    %if __LIBC_CC_IS_rp3 && (__LIBC_ENABLE_%3>1 || __LIBC_IS_NEEDED_rp3_)
+      __LIBC_FUNC %1__RP3__
+      %define __LIBC_NEED___do_syscall3__RP3__
+      push byte %2
+      jmp short __do_syscall3__RP3__
+    %endif
+  %endif
+%endm
+
+; Example: __LIBC_LINUX_SYSCALL_ALIAS open, open3, 5, SYSCALL
+%macro __LIBC_LINUX_SYSCALL_ALIAS 4
+  %ifndef __LIBC_WIN32  ; TODO(pts): Implement support.
+    __LIBC_CHECK_NEEDED %1
+    __LIBC_CHECK_NEEDED %2, a
+    %if __LIBC_CC_IS_watcall && (__LIBC_ENABLE_%4>1 || __LIBC_IS_NEEDED_watcall_ || __LIBC_IS_NEEDED_watcall_a)
+      %if __LIBC_IS_NEEDED_watcall_ || __LIBC_ENABLE_%4>1
+        __LIBC_FUNC %1_
+      %endif
+      %if __LIBC_IS_NEEDED_watcall_a || __LIBC_ENABLE_%4>1
+        __LIBC_FUNC %2_
+      %endif
+      %define __LIBC_NEED___do_syscall3_
+      push byte %3
+      jmp short __do_syscall3_
+    %endif
+    %if __LIBC_CC_IS_rp3 && (__LIBC_ENABLE_%4>1 || __LIBC_IS_NEEDED_rp3_ || __LIBC_IS_NEEDED_rp3_a)
+      %if __LIBC_IS_NEEDED_rp3_ || __LIBC_ENABLE_%4>1
+        __LIBC_FUNC %1__RP3__
+      %endif
+      %if __LIBC_IS_NEEDED_rp3_a || __LIBC_ENABLE_%4>1
+        __LIBC_FUNC %2__RP3__
+      %endif
+      %define __LIBC_NEED___do_syscall3__RP3__
+      push byte %3
+      jmp short __do_syscall3__RP3__
+    %endif
+  %endif
+%endm
+
+; TODO(pts): Generate both the watcall and the rp3 variants if needed.
+; (Usually it isn't needed.)
+
+; Syscall numbers are valid for Linux i386 only.
+__LIBC_LINUX_SYSCALL sys_brk, 45, SYSCALL
+__LIBC_LINUX_SYSCALL_ALIAS unlink, remove, 10, SYSCALL
+__LIBC_LINUX_SYSCALL close, 6, SYSCALL
+__LIBC_LINUX_SYSCALL creat, 8, SYSCALL
+__LIBC_LINUX_SYSCALL rename, 38, SYSCALL
+__LIBC_LINUX_SYSCALL_ALIAS open, open3, 5, SYSCALL  ; With 2 or 3 arguments, arg3 is mode (e.g. 0644).
+__LIBC_LINUX_SYSCALL read, 3, SYSCALL
+__LIBC_LINUX_SYSCALL lseek, 19, SYSCALL
+__LIBC_LINUX_SYSCALL chdir, 12, SYSCALL
+__LIBC_LINUX_SYSCALL mkdir, 39, SYSCALL
+__LIBC_LINUX_SYSCALL rmdir, 40, SYSCALL
+__LIBC_LINUX_SYSCALL getpid, 20, SYSCALL
+__LIBC_LINUX_SYSCALL write, 4, WE
+
+; --- Entry and exit().
+
+%ifndef __LIBC_WIN32  ; TODO(pts): Implement support.
+
+__LIBC_ADD_DEP _start, exit
+%if __LIBC_ENABLE_WE>1
+%define __LIBC_NEED__start
+%endif
+
+%ifdef __LIBC_NEED__start
+global $_start
+%ifidn __OUTPUT_FORMAT__,obj
+extern SYM($main_from_libc)
+..start:
+%endif
+%ifidn __OUTPUT_FORMAT__,elf
+extern $main  ; No SYM(...), this is user-defined.
+%endif
+%ifidn __OUTPUT_FORMAT__,bin
+%if __LIBC_INCLUDED==0
+SYM($main_from_libc) equ $$  ; Dummy value to avoid undefined symbols.
+%endif
+%endif
+$_start:  ; Program entry point on Linux i386.
+		pop eax			; argc.
+		mov edx, esp		; argv.
+%if __LIBC_CC_IS_watcall
+		call SYM($main_from_libc)
+%else  ; regparm(3).
+  %if __LIBC_CC_EVIDENCE_rp3==0  ; Make it also work if main(...) is regparm(0), e.g. `gcc' without `-mregparm=3'. TODO(pts): When can we be sure GCC was using regparm(3) thus remove these pushes? Do a little test on the gcc assembly output.
+		push edx
+		push eax
+  %endif
+		call $main
+%endif
+		; Fall through to exit.
+%endif  ; ifdef __LIBC_NEED_start
+
+; _start falls through here.
+__LIBC_CHECK_NEEDED _start
+%if __LIBC_ENABLE_WE>1 || __LIBC_IS_NEEDED_asis_
+  %if __LIBC_CC_IS_watcall
+    %define __LIBC_NEED_exit_
+  %endif
+  %if __LIBC_CC_IS_rp3
+    %define __LIBC_NEED_exit__RP3__
+  %endif
+%endif
+__LIBC_CHECK_NEEDED exit
+%if (__LIBC_IS_NEEDED_watcall_ && __LIBC_CC_IS_watcall) || (__LIBC_IS_NEEDED_rp3_ && __LIBC_CC_IS_rp3)
+  __LIBC_FUNC SYM(exit)
+		push byte 1		; __NR_exit.
+%endif
+		; Fall through to __do_syscall3.
+
+%macro __LIBC_FUNC___do_syscall3 0  ; Do system call of up to 3 argumnts: dword[esp]: syscall number, eax: arg1, edx: arg2, ebx: arg3.
+		xchg REGNARG, [esp]	; Keep REGNARG pushed.
+		xchg eax, ebx
+%ifidn REGARG3,ebx  ; __watcall.
+		xchg eax, edx
+		xchg eax, ecx
+%else  ; regparm(3).
+		xchg ecx, edx
+%endif
+		push edx
+		push REGARG3
+		int 80h
+		test eax, eax
+		jns .8
+		or eax, byte -1
+.8:		pop REGARG3
+		pop edx
+		pop REGNARG
+		ret
+		; This would also work, but it is longer:
+		;xchg eax, ebx
+		;xor eax, eax
+		;inc eax
+		;int 80h
+%endm
+__LIBC_ADD_DEP exit, __do_syscall3
+__LIBC_MAYBE_ADD_ONE __do_syscall3
+
+%endif  ; ifndef __LIBC_WIN32
+
 ; --- 64-bit integer multiplication, division, modulo and shifts.
 
-%ifdef FEATURES_INT64
-
+%macro __LIBC_FUNC___I8D 0
 ; Used by OpenWatcom directly, and used by GCC through the __udivdi3 wrapper.
 ; It uses __U8D.
 ;
 ; Divide (signed) EDX:EAX by ECX:EBX, store the result in EDX:EAX and the modulo in ECX:EBX.
 ; Keep other registers (except for EFLAGS) intact.
-global $__I8D  ; No SYM(...), the OpenWatcom C compiler calls it like this.
-$__I8D:
 		or edx, edx
 		js .2
 		or ecx, ecx
@@ -425,13 +623,15 @@ $__I8D:
 		neg eax
 		sbb edx, 0
 		ret
+%endm
+__LIBC_ADD_DEP_ASIS __I8D, __U8D
+__LIBC_MAYBE_ADD_ASIS __I8D, INT64  ; No SYM(...), the OpenWatcom C compiler calls it like this.
 
 ; Used by OpenWatcom directly, and used by GCC through the __udivdi3 wrapper.
 ;
 ; Divide (unsigned) EDX:EAX by ECX:EBX, store the result in EDX:EAX and the modulo in ECX:EBX.
 ; Keep other registers (except for EFLAGS) intact.
-global $__U8D  ; No SYM(...), the OpenWatcom C compiler calls it like this.
-$__U8D:
+%macro __LIBC_FUNC___U8D 0
 		or ecx, ecx
 		jnz .6			; Is ECX nonzero (divisor is >32 bits)? If yes, then do it the slow and complicated way.
 		dec ebx
@@ -511,8 +711,99 @@ $__U8D:
 		pop esi
 		pop ebp
 		ret
+%endm
+__LIBC_MAYBE_ADD_ASIS __U8D, INT64  ; No SYM(...), the OpenWatcom C compiler calls it like this.
 
-%ifidn __OUTPUT_FORMAT__,elf  ; GCC.
+; For OpenWatcom.
+%macro __LIBC_FUNC___I8M 0
+		; Fall through to __U8M, same implementation.
+%endm
+__LIBC_ADD_DEP_ASIS __I8M, __U8M
+__LIBC_MAYBE_ADD_ASIS __I8M, INT64  ; No SYM(...), the OpenWatcom C compiler calls it like this.
+
+; For OpenWatcom.
+%macro __LIBC_FUNC___U8M 0
+		test edx, edx
+		jne .1
+		test ecx, ecx
+		jne .1
+		mul ebx
+		ret
+.1:		push eax
+		push edx
+		mul ecx
+		mov ecx, eax
+		pop eax
+		mul ebx
+		add ecx, eax
+		pop eax
+		mul ebx
+		add edx, ecx
+		ret
+%endm
+__LIBC_MAYBE_ADD_ASIS __U8M, INT64  ; No SYM(...), the OpenWatcom C compiler calls it like this.
+
+; For OpenWatcom.
+%macro __LIBC_FUNC___U8RS 0
+		mov ecx, ebx
+		and cl, 3fh
+		test cl, 20h
+		jne .1
+		shrd eax, edx, cl
+		shr edx, cl
+		ret
+.1:		mov eax, edx
+		sub ecx, 20h
+		xor edx, edx
+		shr eax, cl
+		ret
+%endm
+__LIBC_MAYBE_ADD_ASIS __U8RS, INT64  ; No SYM(...), the OpenWatcom C compiler calls it like this.
+
+; For OpenWatcom.
+%macro __LIBC_FUNC___I8RS 0
+		mov ecx, ebx
+		and cl, 3fh
+		test cl, 20h
+		jne .2
+		shrd eax, edx, cl
+		sar edx, cl
+		ret
+.2:		mov eax, edx
+		sub cl, 20h
+		sar edx, 1fh
+		sar eax, cl
+		ret
+%endm
+__LIBC_MAYBE_ADD_ASIS __I8RS, INT64  ; No SYM(...), the OpenWatcom C compiler calls it like this.
+
+; For OpenWatcom.
+%macro __LIBC_FUNC___I8LS 0
+		; Fall through to __U8LS, same implementation.
+%endm
+__LIBC_ADD_DEP_ASIS __I8LS, __U8LS
+__LIBC_MAYBE_ADD_ASIS __I8LS, INT64  ; No SYM(...), the OpenWatcom C compiler calls it like this.
+
+; For OpenWatcom.
+%macro __LIBC_FUNC___U8LS 0
+		mov ecx, ebx
+		and cl, 3fh
+		test cl, 20h
+		jne .3
+		shld edx, eax, cl
+		shl eax, cl
+		ret
+.3:		mov edx, eax
+		sub cl, 20h
+		xor eax, eax
+		shl edx, cl
+		ret
+%endm
+__LIBC_MAYBE_ADD_ASIS __U8LS, INT64  ; No SYM(...), the OpenWatcom C compiler calls it like this.
+
+%ifdef FEATURES_INT64
+
+%ifidn __OUTPUT_FORMAT__,elf  ; GCC. !!! especially for rp0.
 
 ; By migrating the functions below to be wrappers to the OpenWatcom
 ; functions $__I8D and $__U8D, this is how many bytes were saved:
@@ -621,79 +912,6 @@ __umoddi3__RP3__:
 
 %else  ; OpenWatcom.
 
-; For OpenWatcom.
-global $__U8M  ; No SYM(...), the OpenWatcom C compiler calls it like this.
-$__U8M:
-global $__I8M  ; No SYM(...), the OpenWatcom C compiler calls it like this.
-$__I8M:
-		test edx, edx
-		jne .1
-		test ecx, ecx
-		jne .1
-		mul ebx
-		ret
-.1:		push eax
-		push edx
-		mul ecx
-		mov ecx, eax
-		pop eax
-		mul ebx
-		add ecx, eax
-		pop eax
-		mul ebx
-		add edx, ecx
-		ret
-
-; For OpenWatcom.
-global $__U8RS  ; No SYM(...), the OpenWatcom C compiler calls it like this.
-
-$__U8RS:
-		mov ecx, ebx
-		and cl, 3fh
-		test cl, 20h
-		jne .1
-		shrd eax, edx, cl
-		shr edx, cl
-		ret
-.1:		mov eax, edx
-		sub ecx, 20h
-		xor edx, edx
-		shr eax, cl
-		ret
-
-; For OpenWatcom.
-global $__I8RS  ; No SYM(...), the OpenWatcom C compiler calls it like this.
-$__I8RS:
-		mov ecx, ebx
-		and cl, 3fh
-		test cl, 20h
-		jne .2
-		shrd eax, edx, cl
-		sar edx, cl
-		ret
-.2:		mov eax, edx
-		sub cl, 20h
-		sar edx, 1fh
-		sar eax, cl
-		ret
-
-; For OpenWatcom.
-global $__U8LS  ; No SYM(...), the OpenWatcom C compiler calls it like this.
-$__U8LS:
-global $__I8LS  ; No SYM(...), the OpenWatcom C compiler calls it like this.
-$__I8LS:
-		mov ecx, ebx
-		and cl, 3fh
-		test cl, 20h
-		jne .3
-		shld edx, eax, cl
-		shl eax, cl
-		ret
-.3:		mov edx, eax
-		sub cl, 20h
-		xor eax, eax
-		shl edx, cl
-		ret
 
 %endif  ; GCC or OpenWatcom.
 

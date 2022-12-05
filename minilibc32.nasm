@@ -140,6 +140,7 @@
   %define __LIBC_CC_EVIDENCE_rp3 0
   ; TODO(pts): Implement rp0, supported by both GCC and OpenWatcom.
   %error 'Unknown calling convention for libc.'
+  %error __LIBC_ABI_cc__val
   times -1 nop  ; Force error on NASM 0.98.39.
 %endif
 __LIBC_CC
@@ -165,16 +166,19 @@ $%1:
 
 
 %macro __LIBC_MAYBE_ADD 2
+  %define __LIBC_LAST_ADDED 0
   __LIBC_CHECK_NEEDED %1
   %if (__LIBC_ENABLE_%2>1 && __LIBC_CC_IS_watcall) || __LIBC_IS_NEEDED_watcall_
     __LIBC_CC_watcall
     __LIBC_FUNC %1_
     __LIBC_FUNC_%1
+    %define __LIBC_LAST_ADDED 1
   %endif
   %if (__LIBC_ENABLE_%2>1 && __LIBC_CC_IS_rp3) || __LIBC_IS_NEEDED_rp3_
     __LIBC_CC_rp3
     __LIBC_FUNC %1__RP3__
     __LIBC_FUNC_%1
+    %define __LIBC_LAST_ADDED 1
   %endif
   __LIBC_CC
 %endm
@@ -367,8 +371,6 @@ __LIBC_MAYBE_ADD memcpy, GENERAL
 
 ; --- Functions using the Linux i386 syscalls.
 
-%ifndef FEATURES_WE
-
 %ifndef __LIBC_WIN32  ; TODO(pts): Implement support.
 
 ; Implemented using sys_brk(2).
@@ -423,10 +425,15 @@ __LIBC_MAYBE_ADD memcpy, GENERAL
 %endm
 __LIBC_ADD_DEP malloc, sys_brk  ; !! TODO(pts): Automatic, based on `call'.
 __LIBC_MAYBE_ADD malloc, GENERAL
+%if __LIBC_LAST_ADDED
+section __LIBC_BSS
+$__malloc_base	resd 1  ; char *base;
+$__malloc_free	resd 1  ; char *free;
+$__malloc_end	resd 1  ; char, *end;
+section .text
+%endif
 
 %endif  ; ifndef __LIBC_WIN32
-
-%endif  ; ifndef FEATURES_WE
 
 ; --- Linux i386 syscall (system call) functions.
 
@@ -624,6 +631,8 @@ __LIBC_MAYBE_ADD_ONE __do_syscall3
 		sbb edx, 0
 		ret
 %endm
+__LIBC_ADD_DEP_ASIS __moddi3, __I8D
+__LIBC_ADD_DEP_ASIS __divdi3, __I8D
 __LIBC_ADD_DEP_ASIS __I8D, __U8D
 __LIBC_MAYBE_ADD_ASIS __I8D, INT64  ; No SYM(...), the OpenWatcom C compiler calls it like this.
 
@@ -712,6 +721,8 @@ __LIBC_MAYBE_ADD_ASIS __I8D, INT64  ; No SYM(...), the OpenWatcom C compiler cal
 		pop ebp
 		ret
 %endm
+__LIBC_ADD_DEP_ASIS __umoddi3, __U8D
+__LIBC_ADD_DEP_ASIS __udivdi3, __U8D
 __LIBC_MAYBE_ADD_ASIS __U8D, INT64  ; No SYM(...), the OpenWatcom C compiler calls it like this.
 
 ; For OpenWatcom.
@@ -801,9 +812,20 @@ __LIBC_MAYBE_ADD_ASIS __I8LS, INT64  ; No SYM(...), the OpenWatcom C compiler ca
 %endm
 __LIBC_MAYBE_ADD_ASIS __U8LS, INT64  ; No SYM(...), the OpenWatcom C compiler calls it like this.
 
-%ifdef FEATURES_INT64
+%define __LIBC_GCCINT64 none
+%ifndef __LIBC_ABI_cc_divdi3__val
+  %ifidn __OUTPUT_FORMAT__,elf
+    %if __LIBC_ENABLE_INT64>1
+      %define __LIBC_GCCINT64 rp3
+    %endif
+  %endif
+%elifidn __LIBC_ABI_cc_divdi3__val,rp0
+  %define __LIBC_GCCINT64 rp0
+%elifidn __LIBC_ABI_cc_divdi3__val,rp3
+  %define __LIBC_GCCINT64 rp3
+%endif
 
-%ifidn __OUTPUT_FORMAT__,elf  ; GCC. !!! especially for rp0.
+%ifnidn __LIBC_GCCINT64,none
 
 ; By migrating the functions below to be wrappers to the OpenWatcom
 ; functions $__I8D and $__U8D, this is how many bytes were saved:
@@ -813,116 +835,83 @@ __LIBC_MAYBE_ADD_ASIS __U8LS, INT64  ; No SYM(...), the OpenWatcom C compiler ca
 ; * Migrating __moddi3 to the existing $__I8D saved an additional 503 bytes.
 ; * Migrating __umoddi3 to the existing $__U8D saved an additional 372 bytes.
 ;
-; GCC regparm(0): gcc -mregparm=0 -Wl,wrap=__umoddi3  -- still inconvenient for the user to remember.
-; !! Everywhere. Remove duplicate code?
-global __wrap___divdi3
-__wrap___divdi3:
-		push ebx
-		mov eax, [esp+0x8]
-		mov edx, [esp+0xc]
-		mov ebx, [esp+0x10]	; Low half of the divisor.
-		mov ecx, [esp+0x14]	; High half of the divisor.
-		jmp short __divdi3__RP3__.call
 
 ; For GCC.
-global __divdi3  ; No SYM(...), GCC compiler calls it like this.
-__divdi3:
-global __divdi3__RP3__
-__divdi3__RP3__:
+%macro __LIBC_FUNC___divdi3 0
 		push ebx
-		mov ebx, [esp+8]	; Low half of the divisor.
-		mov ecx, [esp+12]	; High half of the divisor.
-.call:		call $__I8D
-		pop ebx
-		ret
-
-
-; GCC regparm(0): gcc -mregparm=0 -Wl,wrap=__umoddi3  -- still inconvenient for the user to remember.
-; !! Everywhere. Remove duplicate code?
-global __wrap___udivdi3
-__wrap___udivdi3:
-		push ebx
+%ifidn __LIBC_GCCINT64,rp0
 		mov eax, [esp+0x8]
 		mov edx, [esp+0xc]
 		mov ebx, [esp+0x10]	; Low half of the divisor.
 		mov ecx, [esp+0x14]	; High half of the divisor.
-		jmp short __udivdi3__RP3__.call
-
-; TODO(pts): Inline some parts of $__U8D, to gain even more bytes.
-global __udivdi3:
-__udivdi3:
-global __udivdi3__RP3__
-__udivdi3__RP3__:
-		push ebx
+%else  ; rp3.
 		mov ebx, [esp+8]	; Low half of the divisor.
 		mov ecx, [esp+12]	; High half of the divisor.
-.call:		call $__U8D
-		pop ebx
-		ret
-
-; GCC regparm(0): gcc -mregparm=0 -Wl,wrap=__umoddi3  -- still inconvenient for the user to remember.
-; !! Everywhere. Remove duplicate code?
-global __wrap___moddi3
-__wrap___moddi3:
-		push ebx
-		mov eax, [esp+0x8]
-		mov edx, [esp+0xc]
-		mov ebx, [esp+0x10]	; Low half of the divisor.
-		mov ecx, [esp+0x14]	; High half of the divisor.
-		jmp short __moddi3__RP3__.call
-
-; For GCC.
-global __moddi3  ; No SYM(...), GCC compiler calls it like this.
-__moddi3:
-global __moddi3__RP3__
-__moddi3__RP3__:
-		push ebx
-		mov ebx, [esp+8]	; Low half of the divisor.
-		mov ecx, [esp+12]	; High half of the divisor.
-.call:		call $__I8D
-		xchg eax, ebx		; EAX := low half of the modulo, EBX := junk.
-		mov edx, ecx
-		pop ebx
-		ret
-
-; GCC regparm(0): gcc -mregparm=0 -Wl,wrap=__umoddi3  -- still inconvenient for the user to remember.
-; !! Everywhere.
-global __wrap___umoddi3
-__wrap___umoddi3:
-		push ebx
-		mov eax, [esp+0x8]
-		mov edx, [esp+0xc]
-		mov ebx, [esp+0x10]	; Low half of the divisor.
-		mov ecx, [esp+0x14]	; High half of the divisor.
-		jmp short __umoddi3__RP3__.call
-
-; For GCC.
-global __umoddi3  ; No SYM(...), GCC compiler calls it like this, but it's still regparm(3). !! How do we make it also work with -mregparm=0?? We can't. !!!
-__umoddi3:
-global __umoddi3__RP3__
-__umoddi3__RP3__:
-		push ebx
-		mov ebx, [esp+8]	; Low half of the divisor.
-		mov ecx, [esp+12]	; High half of the divisor.
-.call:		call $__U8D
-		xchg eax, ebx		; EAX := low half of the modulo, EBX := junk.
-		mov edx, ecx
-		pop ebx
-		ret
-
-%else  ; OpenWatcom.
-
-
-%endif  ; GCC or OpenWatcom.
-
 %endif
+		call $__I8D
+		pop ebx
+		ret
+%endm
+__LIBC_MAYBE_ADD_ASIS __divdi3, INT64  ; No SYM(...), GCC compiler calls it like this.
 
-; --- Rest of the program code, to avoid undefined labels.
+; For GCC.
+%macro __LIBC_FUNC___udivdi3 0
+		push ebx
+%ifidn __LIBC_GCCINT64,rp0
+		mov eax, [esp+0x8]
+		mov edx, [esp+0xc]
+		mov ebx, [esp+0x10]	; Low half of the divisor.
+		mov ecx, [esp+0x14]	; High half of the divisor.
+%else
+		mov ebx, [esp+8]	; Low half of the divisor.
+		mov ecx, [esp+12]	; High half of the divisor.
+%endif
+		call $__U8D
+		pop ebx
+		ret
+%endm
+__LIBC_MAYBE_ADD_ASIS __udivdi3, INT64  ; No SYM(...), GCC compiler calls it like this.
 
-		section __LIBC_BSS
+; For GCC.
+%macro __LIBC_FUNC___moddi3 0
+		push ebx
+%ifidn __LIBC_GCCINT64,rp0
+		mov eax, [esp+0x8]
+		mov edx, [esp+0xc]
+		mov ebx, [esp+0x10]	; Low half of the divisor.
+		mov ecx, [esp+0x14]	; High half of the divisor.
+%else
+		mov ebx, [esp+8]	; Low half of the divisor.
+		mov ecx, [esp+12]	; High half of the divisor.
+%endif
+		call $__I8D		; !! TODO(pts): Inline this call (and others) if only used once.
+		xchg eax, ebx		; EAX := low half of the modulo, EBX := junk.
+		mov edx, ecx
+		pop ebx
+		ret
+%endm
+__LIBC_MAYBE_ADD_ASIS __moddi3, INT64  ; No SYM(...), GCC compiler calls it like this.
 
-$__malloc_base	resd 1  ; char *base;
-$__malloc_free	resd 1  ; char *free;
-$__malloc_end	resd 1  ; char, *end;
+; For GCC.
+%macro __LIBC_FUNC___umoddi3 0
+		push ebx
+%ifidn __LIBC_GCCINT64,rp0
+		mov eax, [esp+0x8]
+		mov edx, [esp+0xc]
+		mov ebx, [esp+0x10]	; Low half of the divisor.
+		mov ecx, [esp+0x14]	; High half of the divisor.
+%else
+		mov ebx, [esp+8]	; Low half of the divisor.
+		mov ecx, [esp+12]	; High half of the divisor.
+%endif
+		call $__U8D
+		xchg eax, ebx		; EAX := low half of the modulo, EBX := junk.
+		mov edx, ecx
+		pop ebx
+		ret
+%endm
+__LIBC_MAYBE_ADD_ASIS __umoddi3, INT64  ; No SYM(...), GCC compiler calls it like this.
+
+%endif  ; ifnidn __LIBC_GCCINT64,none
 
 ; __END__

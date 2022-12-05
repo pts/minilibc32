@@ -1577,6 +1577,10 @@ $win32def%define __LIBC_INCLUDED
       my $new_mode = ((($st[2] & 0777) | 0111) & ~umask());
       die "fatal: chmod $outfn: $!\n" if !chmod($new_mode, $outfn);
     }
+    my $size = -s($outfn);
+    $size = "?" if !defined($size);
+    my $target = $is_win32 ? "Win32" : "Linux i386";
+    print "info: created $target program: $outfn ($size bytes)\n";
   }
 }
 

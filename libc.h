@@ -121,12 +121,12 @@ int __abitest_retsum(int a1, int a2, int a3) { return a1 + a2 + a3; }
 
 /* --- <stdarg.h> */
 
-#ifdef __GNUC__  /* !!! Also copy from __WATCOMC__ */
-typedef char *va_list;  /* i386 only. */
-#define va_start(ap, last) ap = ((char *)&(last)) + ((sizeof(last)+3)&~3)  /* i386 only. */
-#define va_arg(ap, type) (ap += (sizeof(type)+3)&~3, *(type *)(ap - ((sizeof(type)+3)&~3)))  /* i386 only. */
-#define va_copy(dest, src) (dest) = (src)  /* i386 only. */
-#define va_end(ap)  /* i386 only. */
+#if defined(__GNUC__) || defined(__WATCOMC__)  /* i386 only */
+typedef char *va_list;
+#define va_start(ap, last) ((ap) = (char*)&(last) + ((sizeof(last)+3)&~3), (void)0)  /* i386 only. */
+#define va_arg(ap, type) ((ap) += (sizeof(type)+3)&~3, *(type*)((ap) - ((sizeof(type)+3)&~3)))  /* i386 only. */
+#define va_copy(dest, src) ((dest) = (src), (void)0)  /* i386 only. */
+#define va_end(ap) /*((ap) = 0, (void)0)*/  /* i386 only. Adding the `= 0' back doesn't make a difference. */
 #endif
 
 /* --- <ctype.h> */

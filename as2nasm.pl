@@ -1414,10 +1414,12 @@ if ($srcfmt eq "as" and $do_add_libc and $outfmt eq "prog") {  # Remove F_ prefi
   die "fatal: open NASM source file: $nasmgfn\n: $!" if !open($nasmfh, "<", $nasmfn);
   die "fatal: open global-label-renamed NASM source file: $nasmgfn\n: $!" if !open($nasmgfh, ">", $nasmgfn);
   push @unlink_fns, $nasmgfn;
+  my $had_start = 0;
   while (<$nasmfh>) {
     # TODO(pts): Use any NASM label syntax.
     s@(\A|[^.\w\@?\$])([FSL])_([.\w\@?\$]+)@ $2 eq "F" ? "$1\$$3" : "$1\$_\$\x40$3" @ge if !m@'@;  # Remove F_ prefix from global labels, for linking with libc.
-    print $nasmgfh $_;
+    $had_start = 1 if $_ eq "\$_start:\n";
+    print $nasmgfh $_ unless $had_start and $_ eq "_start:\n";   # Don't add duplice `_start:' label.
   }
   die "fatal: error writing to global-label-renamed NASM source file\n" if !close($nasmgfh);
   close($nasmfh);

@@ -18,7 +18,7 @@ GCC=gcc
 set -ex
 
 # For size comparisons of the file minilibc32.bin.
-$NASM -O9 -f bin -o minilibc32.bin minilibc32.nasm
+$NASM -O9 -f bin -DFEATURES_ALLOCA -o minilibc32.bin minilibc32.nasm
 ls -ld minilibc32.bin
 
 # Compile the libc for OpenWatcom Linux i386.
@@ -33,7 +33,7 @@ $NASM -O9 -f elf -o minilibc32.o minilibc32.nasm
 # Compile write(2)+exit(2) version (for hello-world benchmark).
 $NASM -O9 -f elf -DFEATURES_WE -o minilibc32we.o minilibc32.nasm
 # Compile full version including 64-bit integers.
-$NASM -O9 -f elf -DFEATURES_INT64 -o minilibc32f.o minilibc32.nasm
+$NASM -O9 -f elf -DFEATURES_INT64 -DFEATURES_ALLOCA -o minilibc32f.o minilibc32.nasm
 
 # Compile the minilibc32.s fork with GNU as.
 AS="$($GCC -print-prog-name=as)"

@@ -50,6 +50,7 @@
   %define __LIBC_ENABLE_SYSCALL 1  ; Linux syscalls other than write(...) + exit(...).
   %define __LIBC_ENABLE_GENERAL 1  ; Enable general (non-target-specific) functions.
   %define __LIBC_ENABLE_INT64 1
+  %define __LIBC_ENABLE_ALLOCA 1
 %else
   %define __LIBC_INCLUDED 0
   %define __LIBC_ENABLE_WE 2  ; write(...) + exit(...).
@@ -57,9 +58,15 @@
     %define __LIBC_ENABLE_SYSCALL 0
     %define __LIBC_ENABLE_GENERAL 0
     %define __LIBC_ENABLE_INT64 0
+    %define __LIBC_ENABLE_ALLOCA 0
   %else
     %define __LIBC_ENABLE_SYSCALL 2
     %define __LIBC_ENABLE_GENERAL 2
+    %ifdef FEATURES_ALLOCA
+      %define __LIBC_ENABLE_ALLOCA 2
+    %else
+      %define __LIBC_ENABLE_ALLOCA 0
+    %endif
     %ifdef FEATURES_INT64
       %define __LIBC_ENABLE_INT64 2
     %else
@@ -368,6 +375,24 @@ __LIBC_MAYBE_ADD_SAME strcmp, GENERAL
 		ret
 %endm
 __LIBC_MAYBE_ADD memcpy, GENERAL
+
+; Needed by the TCC (__TINYC__) compiler 0.9.26.
+; The ABI (register arguments) is specific to alloca, doesn't depend on -mregparm=....
+; TODO(pts): Make sure that GCC uses __builtin_alloca (-fbuiltin-alloca?).
+;
+; FYI mark stack as nonexecutable in GNU as: .section .note.GNU-stack,"",@progbits
+%macro __LIBC_FUNC_alloca 0
+		pop edx
+		pop eax
+		add eax, 3
+		and eax, ~3
+		jz .1
+		sub esp, eax
+		mov eax, esp
+.1:		push edx
+		push edx
+%endm
+__LIBC_MAYBE_ADD_ASIS alloca, ALLOCA
 
 ; --- Functions using the Linux i386 syscalls.
 

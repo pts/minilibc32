@@ -589,24 +589,43 @@ __LIBC_CHECK_NEEDED exit
 %endif
 		; Fall through to __do_syscall3.
 
-%macro __LIBC_FUNC___do_syscall3 0  ; Do system call of up to 3 argumnts: dword[esp]: syscall number, eax: arg1, edx: arg2, ebx: arg3.
-		xchg REGNARG, [esp]	; Keep REGNARG pushed.
+; Do Linux i386 syscall (system call) of up to 3 arguments:
+;
+; * in dword[ESP(+4)]: syscall number, will be popped upon return
+; * maybe in EAX: arg1
+; * maybe in EDX: arg2
+; * maybe in REGARG3 (EBX for watcall, ECX for rp3): arg3
+; * out EAX: result or -1 on error
+; * out EBX: kept intact for watcall, kept intact for rp3
+; * out ECX: kept intact for watcall, destroyed   for rp3
+; * out EDX: kept intact for watcall, destroyed   for rp3
+;
+; For watcall syscall0, EDX, EBX and ECX has to be kept intact.
+; For watcall syscall1, EBX and ECX has to be kept intact.
+; For watcall syscall2, ECX has to be kept intact.
+; For rp3 syscall*, EBX has to be kept intact.
+%macro __LIBC_FUNC___do_syscall3 0
+		xchg REGNARG, [esp]	; Keep (ECX for watcall, EBX for rp3) pushed.
+%ifidn REGARG3,ebx  ; watcall.
+		push edx
+		push ebx
 		xchg eax, ebx
-%ifidn REGARG3,ebx  ; __watcall.
 		xchg eax, edx
 		xchg eax, ecx
 %else  ; regparm(3).
+		xchg eax, ebx
 		xchg ecx, edx
 %endif
-		push edx
-		push REGARG3
-		int 80h
+		int 0x80
 		test eax, eax
 		jns .8
 		or eax, byte -1
-.8:		pop REGARG3
+.8:
+%ifidn REGARG3,ebx  ; watcall.
+		pop ebx
 		pop edx
-		pop REGNARG
+%endif
+		pop REGNARG		; Restore (ECX for watcall, EBX for rp3).
 		ret
 		; This would also work, but it is longer:
 		;xchg eax, ebx

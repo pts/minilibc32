@@ -106,12 +106,14 @@
   %define SYM(name) SYM_RP3(name)
   %define REGARG3 ecx
   %define REGNARG ebx  ; A register which is not used by the first 3 function arguments.
+  %define REGDOSAVE2 0  ; EDX and REGARG3 are scratch registers, the callee may modify them.
 %endm
 
 %macro __LIBC_CC_watcall 0  ; OpenWatcom __watcall calling convention.
   %define SYM(name) SYM_WATCALL(name)
   %define REGARG3 ebx
   %define REGNARG ecx
+  %define REGDOSAVE2 1  ; EDX and REGARG3 must be saved and restored by the callee.
 %endm
 
 %macro __LIBC_CC_rp3_and_watcall 0
@@ -401,29 +403,58 @@ __LIBC_MAYBE_ADD_ASIS alloca, ALLOCA
 
 %ifndef __LIBC_WIN32  ; TODO(pts): Implement support.
 
-; Implemented using sys_brk(2).
-%macro __LIBC_FUNC_malloc 0
-		push ecx  ; !! TODO(pts): Not necessary to save+restore in rp3.
-		push edx  ; !! TODO(pts): Not necessary to save+restore in rp3.
+; Implemented using sys_brk(2). Equivalent to the following C code, but was
+; size-optimized.
+;
+; A simplistic allocator which creates a heap of 64 KiB first, and then
+; doubles it when necessary. It is implemented using Linux system call
+; brk(2), exported by the libc as sys_brk(...). free(...)ing is not
+; supported. Returns an unaligned address (which is OK on x86).
+;
+; static void *malloc_far(size_t size) {
+;     static char *base, *free, *end;
+;     ssize_t new_heap_size;
+;     if ((ssize_t)size <= 0) return NULL;  /* Fail if size is too large (or 0). */
+;     if (!base) {
+;         if (!(base = free = (char*)sys_brk(NULL))) return NULL;  /* Error getting the initial data segment size for the very first time. */
+;         new_heap_size = 64 << 10;  /* 64 KiB. */
+;         goto grow_heap;  /* TODO(pts): Reset base to NULL if we overflow below. */
+;     }
+;     while (size > (size_t)(end - free)) {  /* Double the heap size until there is `size' bytes free. */
+;         new_heap_size = (end - base) << 1;  /* !! TODO(pts): Don't allocate more than 1 MiB if not needed. */
+;       grow_heap:
+;         if ((ssize_t)new_heap_size <= 0 || (size_t)base + new_heap_size < (size_t)base) return NULL;  /* Heap would be too large. */
+;         if ((char*)sys_brk(base + new_heap_size) != base + new_heap_size) return NULL;  /* Out of memory. */
+;         end = base + new_heap_size;
+;     }
+;     free += size;
+;     return free - size;
+; }
+%macro __LIBC_FUNC_malloc 0  ; !!! fixed by using REGNARG instead of ECX; works with TCC and OpenWatcom (??), crashes GCC-generated program.
+%if REGDOSAVE2
+		push ecx
+		push edx
+%endif
 		mov edx, eax
 		test eax, eax
-		jg .14
-.13:		xor eax, eax
-		pop edx
-		pop ecx
-		ret
-.14:		mov eax, [$__malloc_base]
+		jng .13
+		mov eax, [$__malloc_base]
 		test eax, eax
-		jne .15
-		call SYM($sys_brk)
+		jnz .15
+%if REGDOSAVE2==0
+		push edx
+%endif
+		call SYM($sys_brk)	; For rp3 (REGDOSAVE2==0), destroys ECX and EDX.
+%if REGDOSAVE2==0
+		pop edx
+%endif
 		mov [$__malloc_free], eax
 		mov [$__malloc_base], eax
 		test eax, eax
-		je .18
-		mov ecx, 10000h		; 64 KiB minimum allocation.
-		add eax, ecx
-		mov [$__malloc_end], eax
+		jz .18
+		mov ecx, 0x10000	; 64 KiB minimum allocation.
 		jmp .16
+.14:		mov [$__malloc_end], eax
 .15:		mov eax, [$__malloc_end]
 		sub eax, [$__malloc_free]
 		cmp edx, eax
@@ -439,16 +470,27 @@ __LIBC_MAYBE_ADD_ASIS alloca, ALLOCA
 		jb .13
 		mov eax, [$__malloc_base]
 		add eax, ecx
-		mov [$__malloc_end], eax
-		call SYM($sys_brk)
-		cmp eax, [$__malloc_end]
-		je .15
-		jmp .13
+		push eax
+%if REGDOSAVE2==0
+		push edx
+%endif
+		call SYM($sys_brk)	; For rp3, destroys ECX and EDX.
+%if REGDOSAVE2==0
+		pop edx
+%endif
+		pop ecx
+		cmp eax, ecx
+		je .14
+.13:		xor eax, eax
+		jmp short .18
 .17:		add [$__malloc_free], edx
 		mov eax, [$__malloc_free]
 		sub eax, edx
-.18:		pop edx
+.18:
+%if REGDOSAVE2
+		pop edx
 		pop ecx
+%endif
 		ret
 %endm
 __LIBC_ADD_DEP malloc, sys_brk  ; !! TODO(pts): Automatic, based on `call'.

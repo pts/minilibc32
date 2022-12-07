@@ -430,67 +430,52 @@ __LIBC_MAYBE_ADD_ASIS alloca, ALLOCA
 ;     free += size;
 ;     return free - size;
 ; }
-%macro __LIBC_FUNC_malloc 0  ; !!! fixed by using REGNARG instead of ECX; works with TCC and OpenWatcom (??), crashes GCC-generated program.
+%macro __LIBC_FUNC_malloc 0
+		push ebx
 %if REGDOSAVE2
 		push ecx
 		push edx
 %endif
-		mov edx, eax
 		test eax, eax
-		jng .13
-		mov eax, [$__malloc_base]
+		jle .18
+		mov ebx, eax
+		cmp dword [__malloc_base], 0
+		jne .7
+		xor eax, eax
+		call SYM(sys_brk)
+		mov [__malloc_free], eax
+		mov [__malloc_base], eax
 		test eax, eax
-		jnz .15
-%if REGDOSAVE2==0
-		push edx
-%endif
-		call SYM($sys_brk)	; For rp3 (REGDOSAVE2==0), destroys ECX and EDX.
-%if REGDOSAVE2==0
-		pop edx
-%endif
-		mov [$__malloc_free], eax
-		mov [$__malloc_base], eax
-		test eax, eax
-		jz .18
-		mov ecx, 0x10000	; 64 KiB minimum allocation.
-		jmp .16
-.14:		mov [$__malloc_end], eax
-.15:		mov eax, [$__malloc_end]
-		sub eax, [$__malloc_free]
-		cmp edx, eax
-		jbe .17
-		mov ecx, [$__malloc_end]
-		sub ecx, [$__malloc_base]
-		add ecx, ecx
-		test ecx, ecx
-		jnle .13
-.16:		mov eax, [$__malloc_base]
-		add eax, ecx
-		cmp eax, [$__malloc_base]
-		jb .13
-		mov eax, [$__malloc_base]
-		add eax, ecx
+		jz short .18
+		mov eax, 0x10000	; 64 KiB minimum allocation.
+.9:		add eax, [__malloc_base]
+		jc .18
 		push eax
-%if REGDOSAVE2==0
-		push edx
-%endif
-		call SYM($sys_brk)	; For rp3, destroys ECX and EDX.
-%if REGDOSAVE2==0
-		pop edx
-%endif
-		pop ecx
-		cmp eax, ecx
-		je .14
-.13:		xor eax, eax
-		jmp short .18
-.17:		add [$__malloc_free], edx
-		mov eax, [$__malloc_free]
-		sub eax, edx
-.18:
+		call SYM(sys_brk)	; For rp3, destroys ECX and EDX.
+		pop edx			; This (and the next line) could be ECX instead.
+		cmp eax, edx
+		jne .18
+		mov [__malloc_end], eax
+.7:		mov edx, [__malloc_end]
+		mov eax, [__malloc_free]
+		mov ecx, edx
+		sub ecx, eax
+		cmp ecx, ebx
+		jb .21
+		add ebx, eax
+		mov [__malloc_free], ebx
+		jmp short .17
+.21:		sub edx, [__malloc_base]
+		lea eax, [edx+edx]
+		test eax, eax
+		jg .9
+.18:		xor eax, eax
+.17:
 %if REGDOSAVE2
 		pop edx
 		pop ecx
 %endif
+		pop ebx
 		ret
 %endm
 __LIBC_ADD_DEP malloc, sys_brk  ; !! TODO(pts): Automatic, based on `call'.

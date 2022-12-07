@@ -393,6 +393,7 @@ __LIBC_MAYBE_ADD memcpy, GENERAL
 		mov eax, esp
 .1:		push edx
 		push edx
+		ret
 %endm
 __LIBC_MAYBE_ADD_ASIS alloca, ALLOCA
 

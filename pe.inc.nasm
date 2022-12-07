@@ -269,6 +269,8 @@ section .text  ; !! Implement .data.
 section .bss
 %elifidn %1,__LIBC_BSS  ; Expansion workaround.
 section .bss
+%elifidn %1,__LIBC_TEXT  ; Expansion workaround.
+section .text
 %else
 %error Unsupported Win32 PE _section: %1
 times -1 nop

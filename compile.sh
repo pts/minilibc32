@@ -29,7 +29,7 @@ $NASM -O9 -f obj -DFEATURES_WE -o minilibc32we.obj minilibc32.nasm
 $NASM -O9 -f obj -DFEATURES_INT64 -o minilibc32f.obj minilibc32.nasm
 
 # Compile the libc for GCC Linux i386.
-$NASM -O9 -f elf -o minilibc32.o minilibc32.nasm
+$NASM -O9 -f elf -DFEATURES_ALLOCA -o minilibc32.o minilibc32.nasm
 # Compile write(2)+exit(2) version (for hello-world benchmark).
 $NASM -O9 -f elf -DFEATURES_WE -o minilibc32we.o minilibc32.nasm
 # Compile full version including 64-bit integers.

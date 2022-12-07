@@ -24,7 +24,7 @@
 ; to 3 function arguments in EAX, EDX, ECX (please note that ECX is
 ; different from __watcall), and pushes the rest to the stack ([esp+4],
 ; [esp+8] etc.; [esp] is the return address). The caller removes arguments
-; from the stack. EAX, EBX and ECX and EFLAGS (but not DF) are scratch
+; from the stack. EAX, EDX and ECX and EFLAGS (but not DF) are scratch
 ; registers, the callee has to restore everything else.
 ;
 ; TODO(pts): Convert this NASM source to WASM and GNU as, and drop NASM as a
@@ -83,7 +83,8 @@
 		section _BSS   USE32 class=BSS NOBITS align=4  ; NOBITS is ignored by NASM, but class=BSS works.
 		group DGROUP CONST CONST2 _DATA _BSS
 		section _TEXT
-  %define __LIBC_BSS _BSS  ; Section name.
+  %define __LIBC_BSS  _BSS   ; Section name.
+  %define __LIBC_TEXT _TEXT  ; Section name.
 %else
   %if __LIBC_INCLUDED==0
   ; __LIBC_INCLUDED means that this .nasm source file is %included as part
@@ -94,7 +95,8 @@
 		section .text align=1
 		section .text
   %endif
-  %define __LIBC_BSS .bss  ; Section name.
+  %define __LIBC_BSS  .bss   ; Section name.
+  %define __LIBC_TEXT .text  ; Section name.
 %endif
 
 %define SYM_RP3(name) name %+ __RP3__  ; GCC regparm(3) calling convention is indicated for minilibc32 GCC.
@@ -454,8 +456,8 @@ __LIBC_MAYBE_ADD malloc, GENERAL
 section __LIBC_BSS
 $__malloc_base	resd 1  ; char *base;
 $__malloc_free	resd 1  ; char *free;
-$__malloc_end	resd 1  ; char, *end;
-section .text
+$__malloc_end	resd 1  ; char *end;
+section __LIBC_TEXT
 %endif
 
 %endif  ; ifndef __LIBC_WIN32

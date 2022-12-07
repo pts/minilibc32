@@ -4,7 +4,9 @@ What are the benefits of a custom linker?
 * doesn't emit unnecessary ELF program headers (like PHDR emitted by
   OpenWatcom)
 * merges C string literals by tail (GNU ld does it, OpenWatcom doesn't)
-* doesn't have the .data alignment to 0x1000 bug like GNU ld 2.30 and earlier
+* doesn't align .data to 0x1000 like the OpenWatcom ELF32 linker (adding
+  about 4 KiB of padding between the .text and .data sections)
+* doesn't have the occasional .data alignment to 0x1000 bug like GNU ld 2.30 and earlier
 * doesn't always emit non-executable stack program header, saving a few bytes
 * being an assembler-based linker, removes (or detects) the surprisingly large
   alignment requirements of some global variables

@@ -5,13 +5,17 @@
 
 #undef __LIBC_OK
 
-#if defined(__WATCOMC__) && !defined(__GNUC__) && defined(_M_I386)
+#if defined(__WATCOMC__) && !defined(__GNUC__) && !defined(__TINYC__) && defined(_M_I386)
 #  define __LIBC_OK 1
 #else
-#  if defined(__GNUC__) && !defined(__WATCOMC__) && defined(__i386__)
+#  if defined(__GNUC__) && !defined(__WATCOMC__) && !defined(__TINYC__) && defined(__i386__)
 #    define __LIBC_OK 1
 #  else
-#    error Unsupported libc target.
+#    if defined(__TINYC__) && !defined(__WATCOMC__) && !defined(__GNUC__) && defined(__i386__)
+#      define __LIBC_OK 1
+#    else
+#      error Unsupported libc target.
+#    endif
 #  endif
 #endif
 #ifndef __LIBC_OK
@@ -24,9 +28,15 @@
 #  define __LIBC_FUNC(name, args) __LIBC_CALL name args __asm__(#name "__RP3__")
 #  define __LIBC_NORETURN __attribute__((noreturn, nothrow))
 #else
-#  define __LIBC_CALL __watcall
-#  define __LIBC_FUNC(name, args) __LIBC_CALL name args
-#  define __LIBC_NORETURN __declspec(aborts)
+#  ifdef __WATCOMC__
+#    define __LIBC_CALL __watcall
+#    define __LIBC_FUNC(name, args) __LIBC_CALL name args
+#    define __LIBC_NORETURN __declspec(aborts)
+#  else  /* __TINYC__ */
+#    define __LIBC_CALL __attribute__((regparm(3)))
+#    define __LIBC_FUNC(name, args) __LIBC_CALL name args __asm__(#name "__RP3__")
+#    define __LIBC_NORETURN __attribute__((noreturn, nothrow))
+#  endif
 #endif
 
 #define open open3  /* Avoid using the OpenWatcom C compiler using the `...' form. TODO(pts): Rename assembly symbols in OpenWatcom. #pragma aux sym obj_name [;] */
@@ -121,12 +131,20 @@ int __abitest_retsum(int a1, int a2, int a3) { return a1 + a2 + a3; }
 
 /* --- <stdarg.h> */
 
-#if defined(__GNUC__) || defined(__WATCOMC__)  /* i386 only */
+#if defined(__WATCOMC__) || defined(__TINYC__)  /* i386 only. */
 typedef char *va_list;
 #define va_start(ap, last) ((ap) = (char*)&(last) + ((sizeof(last)+3)&~3), (void)0)  /* i386 only. */
 #define va_arg(ap, type) ((ap) += (sizeof(type)+3)&~3, *(type*)((ap) - ((sizeof(type)+3)&~3)))  /* i386 only. */
 #define va_copy(dest, src) ((dest) = (src), (void)0)  /* i386 only. */
 #define va_end(ap) /*((ap) = 0, (void)0)*/  /* i386 only. Adding the `= 0' back doesn't make a difference. */
+#endif
+
+#if defined(__GNUC__)  /* Works in GCC 4.1 (possibly also earlier) and newer. */
+typedef __builtin_va_list va_list;
+#define va_start(ap, last) __builtin_va_start(ap, last)
+#define va_arg(ap, type) __builtin_va_arg(ap, type)
+#define va_copy(dest, src) __builtin_va_copy(dest, src)
+#define va_end(ap) __builtin_va_end(ap)
 #endif
 
 /* --- <ctype.h> */

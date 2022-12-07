@@ -1,19 +1,41 @@
 minilibc32: size-optimized, minimalistic libc for Linux i386
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-minilibc32 is an experimental, size-optimized and minimalistic libc (C
+minilibc32 is an size-optimized and minimalistic libc (C
 runtime library) for writing programs in C targeting Linux i386 (executable
 program file format ELF32) compiled with the OpenWatcom C compiler or GCC.
 Size-optimized means that the library functions are written by hand in
 assembly language, favoring shorter code size over execution speed.
 
 To try minilibc32 on Linux, install OpenWatcom, GCC, NASM, sstrip
-(https://github.com/BR903/ELFkickers/blob/master/sstrip/sstrip.c),
-and run `./compile.sh' from the cloned Git working directory. The libc
-machine code is in the created minilibc32.bin file (for size comparisons),
-and the test programs (Linux i386 ELF32 executable programs) are in the
-files test_*.ow.
+(https://github.com/BR903/ELFkickers/blob/master/sstrip/sstrip.c), and run
+`./compile.sh' from the cloned Git working directory. The libc machine code
+is in the created minilibc32*.o files (for GCC and TCC (TinyCC)), in
+minilibc32*.obj files (for the OpenWatcom C compiler) and in the
+minilibc32.bin file (for size comparisons), and the test programs (Linux
+i386 ELF32 executable programs) are in the files test*ow and test*gc.
 
-For production use, one of OpenWatcom or GCC (not both) will be enough.
+For production use, one of OpenWatcom or GCC (not both) will be enough. TCC
+also works, but it generates verbose code, defeating the size optimization
+purpose of minilibc32.
+
+Compilation command lines of the hello-world test program:
+
+  $ gcc -static -s -D__LIBC_OMIT_ABITEST_DIVDI3 -nostdlib -nostdinc -Os -m32 -Wl,-z,norelro -Wl,--build-id=none -mno-align-stringops -mregparm=3 -fno-pic -fno-stack-protector -fomit-frame-pointer -fno-ident -ffreestanding -fno-builtin -fno-unwind-tables -fno-asynchronous-unwind-tables -falign-functions=1 -mpreferred-stack-boundary=2 -falign-jumps=1 -falign-loops=1 -march=i386 -ansi -pedantic -W -Wall -Werror=implicit-function-declaration -o test_hello test_hello.c minilibc32.o
+  $ owcc -s -blinux -fnostdlib -Os -fno-stack-check -march=i386 -W -Wall -Wextra -o test_hello test_hello.c minilibc32.obj
+  $ tcc -s -static -O2 -W -Wall -nostdlib -nostdinc -o test_hello test_hello.c minilibc32.o
+
+Then run it:
+
+  $ ./test_hello; echo $?
+  Hello, World!
+  0
+
+Please note that byte sizes of the generated executable program test_hello
+is not very impressive, because the default linkers (of GCC, OpenWatcom and
+TCC) add too much boilerplate, and also the unused libc functions are
+included in the executable. This will be fixed eventually in a future
+version by adding a custom linker which doesn't add unnecesary bytes. That
+linker will also support the Win32 target.
 
 Byte sizes of i386 machine code of some libc functions in minilibc32 using
 the OpenWatcom __watcall calling convention:
@@ -36,14 +58,22 @@ the OpenWatcom __watcall calling convention:
 i386 means in this context means not only the 32-bit Intel x86 (IA-32)
 instruction set architecture (ISA), but also the minimum CPU requirement
 (Intel 80386). Newer 32-bit Intel CPU features (e.g. i686 standing for
-Pentium Pro) are not required.
+Pentium Pro) are neither required or used.
 
-Experimental means that it's closer to proof-of-concept rather than
-production-ready. If you want to develop C programs with a production-ready
-minimalistic libc for Linux i386, use pts-xtiny
-(https://github.com/pts/pts-xtiny) instead. Compared to pts-xtiny,
-minilibc32 contains much less functionality, but the functionality it
-actually contains is much better size-optimized.
+minilibc32 is intentionally kept minimalistic, and it's unlikely that all
+the larger functions (such as printf(3), scanf(3), buffered fwrite(3) and a
+proper memory allocator) will be added soon. If you need more functionality
+and you are targeting Linux i386, use pts-xtiny
+(https://github.com/pts/pts-xtiny) instead. For even more functionality on
+Linux i386, use pts-xstatic
+(https://github.com/pts/pts-clang-xstatic/blob/master/README.pts-xstatic.txt)
+instead.
+
+Compared to pts-xtiny and pts-xstatic, minilibc32 contains much less
+functionality, but the functionality it actually contains is much better
+size-optimized. As soon as the custom linker is written for minilibc32,
+generated executable programs will be smaller than with pts-xtiny and
+pts-xstatic.
 
 With minilibc32 it's not yet possible to create small Linux i386 ELF
 exeutable programs, because (1) all the library (321 bytes) has to be
@@ -62,7 +92,9 @@ This is not an absolute minimum for a hello-world benchmark, because it's
 possible to merge .text and .data to a single section, and it's possible to
 omit the trailing NUL from the message, and by writing everything in assembly
 (the main(...) function is currently in C) it's possible to remove some more
-bytes by better register usage.
+bytes by better register usage. See the classic piece
+https://www.muppetlabs.com/~breadbox/software/tiny/teensy.html on writing
+everything (including the ELF32 header) in NASM assembly language.
 
 Here is the annotated disassembly of the code (.text section) only of the
 hello-world benchmark (60 bytes):
@@ -114,12 +146,12 @@ i386 system call ABI).
 Also note that for each new system call supported there is only 4 bytes
 added to the libc code: `push byte +nr' and `jmp short __do_syscall3'.
 
-minilibc32 was tested with GCC 4.8.4, GCC 6.3.0, GCC 7.5.0, and various
-versions of OpenWatcom released in 2022.
+minilibc32 was tested with GCC 4.8.4, GCC 6.3.0, GCC 7.5.0, TCC (TinyCC)
+0.9.26, and various versions of OpenWatcom released in 2022.
 
 Limitations and missing features from minilibc32:
 
-* Currently the OpenWatcom C compiler and GCC are the only supported
+* Currently the OpenWatcom C compiler, GCC and TCC are the only supported
   compilers. There are plans to add Clang support (which should be easy,
   it's similar enough to GCC).
 * envp and environ are not populated, there is no way to get the

@@ -173,6 +173,11 @@ extern void* __LIBC_FUNC(sys_brk, (void *addr));
 extern int __LIBC_FUNC(creat, (const char *pathname, mode_t mode));
 /* Check return value with `== -1' rather than `< 0' for Win32 portability. */
 extern int __LIBC_FUNC(open, (const char *pathname, int flags, mode_t mode));
+/* Same as open(...), but with 2 arguments, an arbitrary value is passed as
+ * the 3rd argument. Useful for flags without O_CREAT.
+ * Check return value with `== -1' rather than `< 0' for Win32 portability.
+ */
+extern int __LIBC_FUNC(open2, (const char *pathname, int flags));
 extern int __LIBC_FUNC(close, (int fd));
 /**/
 extern ssize_t __LIBC_FUNC(read, (int fd, void *buf, size_t count));

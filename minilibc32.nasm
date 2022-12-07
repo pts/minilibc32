@@ -513,7 +513,7 @@ section __LIBC_TEXT
   %endif
 %endm
 
-; Example: __LIBC_LINUX_SYSCALL_ALIAS open, open3, 5, SYSCALL
+; Example: __LIBC_LINUX_SYSCALL_ALIAS unlink, remove, 10, SYSCALL
 %macro __LIBC_LINUX_SYSCALL_ALIAS 4
   %ifndef __LIBC_WIN32  ; TODO(pts): Implement support.
     __LIBC_CHECK_NEEDED %1
@@ -543,6 +543,43 @@ section __LIBC_TEXT
   %endif
 %endm
 
+; Example: __LIBC_LINUX_SYSCALL_ALIAS open, open2, open3, 5, SYSCALL
+%macro __LIBC_LINUX_SYSCALL_ALIAS3 5
+  %ifndef __LIBC_WIN32  ; TODO(pts): Implement support.
+    __LIBC_CHECK_NEEDED %1
+    __LIBC_CHECK_NEEDED %2, a
+    __LIBC_CHECK_NEEDED %3, b
+    %if __LIBC_CC_IS_watcall && (__LIBC_ENABLE_%5>1 || __LIBC_IS_NEEDED_watcall_ || __LIBC_IS_NEEDED_watcall_a || __LIBC_IS_NEEDED_watcall_b)
+      %if __LIBC_IS_NEEDED_watcall_ || __LIBC_ENABLE_%5>1
+        __LIBC_FUNC %1_
+      %endif
+      %if __LIBC_IS_NEEDED_watcall_a || __LIBC_ENABLE_%5>1
+        __LIBC_FUNC %2_
+      %endif
+      %if __LIBC_IS_NEEDED_watcall_b || __LIBC_ENABLE_%5>1
+        __LIBC_FUNC %3_
+      %endif
+      %define __LIBC_NEED___do_syscall3_
+      push byte %4
+      jmp short __do_syscall3_
+    %endif
+    %if __LIBC_CC_IS_rp3 && (__LIBC_ENABLE_%5>1 || __LIBC_IS_NEEDED_rp3_ || __LIBC_IS_NEEDED_rp3_a || __LIBC_IS_NEEDED_rp3_b)
+      %if __LIBC_IS_NEEDED_rp3_ || __LIBC_ENABLE_%5>1
+        __LIBC_FUNC %1__RP3__
+      %endif
+      %if __LIBC_IS_NEEDED_rp3_a || __LIBC_ENABLE_%5>1
+        __LIBC_FUNC %2__RP3__
+      %endif
+      %if __LIBC_IS_NEEDED_rp3_b || __LIBC_ENABLE_%5>1
+        __LIBC_FUNC %3__RP3__
+      %endif
+      %define __LIBC_NEED___do_syscall3__RP3__
+      push byte %4
+      jmp short __do_syscall3__RP3__
+    %endif
+  %endif
+%endm
+
 ; TODO(pts): Generate both the watcall and the rp3 variants if needed.
 ; (Usually it isn't needed.)
 
@@ -552,7 +589,7 @@ __LIBC_LINUX_SYSCALL_ALIAS unlink, remove, 10, SYSCALL
 __LIBC_LINUX_SYSCALL close, 6, SYSCALL
 __LIBC_LINUX_SYSCALL creat, 8, SYSCALL
 __LIBC_LINUX_SYSCALL rename, 38, SYSCALL
-__LIBC_LINUX_SYSCALL_ALIAS open, open3, 5, SYSCALL  ; With 2 or 3 arguments, arg3 is mode (e.g. 0644).
+__LIBC_LINUX_SYSCALL_ALIAS3 open, open2, open3, 5, SYSCALL  ; With 2 or 3 arguments, arg3 is mode (e.g. 0644).
 __LIBC_LINUX_SYSCALL read, 3, SYSCALL
 __LIBC_LINUX_SYSCALL lseek, 19, SYSCALL
 __LIBC_LINUX_SYSCALL chdir, 12, SYSCALL

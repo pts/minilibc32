@@ -90,14 +90,17 @@ test_hello.ow', the minimum ELF32 hello-world program would be:
 
 This is not an absolute minimum for a hello-world benchmark, because it's
 possible to merge .text and .data to a single section, and it's possible to
-omit the trailing NUL from the message, and by writing everything in assembly
-(the main(...) function is currently in C) it's possible to remove some more
-bytes by better register usage. See the classic piece
+omit the trailing NUL from the message, and by writing everything in
+assembly (the main(...) function is currently in C) it's possible to remove
+some more bytes by better register usage. See the classic piece
 https://www.muppetlabs.com/~breadbox/software/tiny/teensy.html on writing
-everything (including the ELF32 header) in NASM assembly language.
+everything (including the ELF32 header) in NASM assembly language. Based on
+that, the hello-world benchmark hello_min.nasm in the minilibc32 repository
+compiles to just 123 bytes.
 
 Here is the annotated disassembly of the code (.text section) only of the
-hello-world benchmark (60 bytes):
+hello-world benchmark (60 bytes) written in C, compiled with the OpenWatcom
+C compiler, and manually linked:
 
   main_:  ; __watcall calling convention.
   08048100  53                push ebx

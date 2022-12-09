@@ -153,6 +153,8 @@ extern int __LIBC_FUNC(isalpha, (int c));
 extern int __LIBC_FUNC(isspace, (int c));
 extern int __LIBC_FUNC(isdigit, (int c));
 extern int __LIBC_FUNC(isxdigit, (int c));
+extern int __LIBC_FUNC(tolower, (int c));
+extern int __LIBC_FUNC(toupper, (int c));
 
 /* --- <string.h> */
 

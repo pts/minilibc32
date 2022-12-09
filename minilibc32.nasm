@@ -311,6 +311,26 @@ __LIBC_MAYBE_ADD_SAME isdigit, GENERAL
 %endm
 __LIBC_MAYBE_ADD_SAME isxdigit, GENERAL
 
+%macro __LIBC_FUNC_tolower 0
+		sub al, 'A'
+		cmp al, 'Z' - 'A'
+		ja .done
+		add al, 'a' - 'A'
+.done:		add al, 'A'
+		ret
+%endm
+__LIBC_MAYBE_ADD_SAME tolower, GENERAL
+
+%macro __LIBC_FUNC_toupper 0
+		sub al, 'a'
+		cmp al, 'z' - 'a'
+		ja .done
+		add al, 'A' - 'a'
+.done:		add al, 'a'
+		ret
+%endm
+__LIBC_MAYBE_ADD_SAME toupper, GENERAL
+
 %macro __LIBC_FUNC_strlen 0
 		push esi
 		xchg eax, esi

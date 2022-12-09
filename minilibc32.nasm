@@ -100,10 +100,13 @@
 %endif
 
 %define SYM_RP3(name) name %+ __RP3__  ; GCC regparm(3) calling convention is indicated for minilibc32 GCC.
-%define SYM_WATCALL(name) name %+ _  ; OpenWatcom __watcall calling convention is indicated with a trailing `_' by OpenWatcom.
+%define SYM_WATCALL(name) name %+ _    ; OpenWatcom __watcall calling convention is indicated with a trailing `_' by OpenWatcom.
+%define SYM_RP3_SUB(name, sub) name %+ __RP3__ %+ sub  ; GCC regparm(3) calling convention is indicated for minilibc32 GCC.
+%define SYM_WATCALL_SUB(name, sub) name %+ _ %+ sub    ; OpenWatcom __watcall calling convention is indicated with a trailing `_' by OpenWatcom.
 
 %macro __LIBC_CC_rp3 0  ; GCC regparm(3) calling convention.
   %define SYM(name) SYM_RP3(name)
+  %define SYM_SUB(name, sub) SYM_RP3_SUB(name, sub)
   %define REGARG3 ecx
   %define REGNARG ebx  ; A register which is not used by the first 3 function arguments.
   %define REGDOSAVE2 0  ; EDX and REGARG3 are scratch registers, the callee may modify them.
@@ -111,6 +114,7 @@
 
 %macro __LIBC_CC_watcall 0  ; OpenWatcom __watcall calling convention.
   %define SYM(name) SYM_WATCALL(name)
+  %define SYM_SUB(name, sub) SYM_WATCALL_SUB(name, sub)
   %define REGARG3 ebx
   %define REGNARG ecx
   %define REGDOSAVE2 1  ; EDX and REGARG3 must be saved and restored by the callee.
@@ -118,8 +122,10 @@
 
 %macro __LIBC_CC_rp3_and_watcall 0
   %undef SYM
+  %undef SYM_SUB
   %undef REGARG3
   %undef REGNARG
+  %undef REGDOSAVE2
 %endm
 
 %define __LIBC_CC_EVIDENCE_rp3 1  ; Do we have strong evidence (e.g. abitest) that the regparm(3) (rather than regparm(0)) calling convention is used (especially for main(...))?
@@ -228,14 +234,13 @@ $%1:
     __LIBC_CC_watcall
     __LIBC_FUNC %1_
     __LIBC_FUNC_%1
-    __LIBC_CC
   %endif
   %if __LIBC_IS_NEEDED_rp3_ && __LIBC_CC_IS_rp3
     __LIBC_CC_rp3
     __LIBC_FUNC %1__RP3__
     __LIBC_FUNC_%1
-    __LIBC_CC
   %endif
+  __LIBC_CC
 %endm
 
 %macro __LIBC_ADD_DEP_HELPER 2  ; Workaround for NASM 0.98.39, see https://stackoverflow.com/a/74683036

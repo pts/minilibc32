@@ -369,7 +369,12 @@ sub process_abitest($$$$) {
     }
     --$i;
     #print STDERR "divdi3_insts=(@$insts)\n";
-    my $movc = 0; my $pushc = 0;
+    my $movc = 0; my $pushc = 0; my $has_lea_ecx = 0;
+    for (my $j = 0; $j < $i; ++$j) {
+      if ($insts->[$j] =~ m@\A\t*lea ecx, \[e[bs]p[+](?!-)@) {
+        $has_lea_ecx = 1; last
+      }
+    }
     while ($i > 0) {
       if ($insts->[$i - 1] =~ m@\A\t*mov e[ad]x, \[e[bs]p+(?!-)@) {
         ++$movc;
@@ -378,6 +383,9 @@ sub process_abitest($$$$) {
         ++$pushc;
         --$i;
       } elsif ($insts->[$i - 1] =~ m@\A\t*(?:push (?:dword )?\[e[bs]p[+](?!-)|(mov) e[ad]x,)@) {
+        --$i;
+        defined($1) ? ++$movc : ++$pushc;
+      } elsif ($has_lea_ecx and $insts->[$i - 1] =~ m@\A\t*(?:push (?:dword )?\[ecx[+](?!-)|(mov) e[ad]x,)@) {
         --$i;
         defined($1) ? ++$movc : ++$pushc;
       } else {
@@ -389,6 +397,7 @@ sub process_abitest($$$$) {
     } elsif ($pushc == 4) {
       print $outfh "_abi cc_divdi3, rp0\n";
     } else {
+      # TODO(pts): Only fail it if _divdi3 is used by actual code below. Othwerwise just warn.
       print STDERR "error: abitest $name failed: movc=$movc pushc=$pushc ($lc)\n";
       return 1;
     }

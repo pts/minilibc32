@@ -392,9 +392,10 @@ __LIBC_MAYBE_ADD_SAME strcpy, GENERAL
 %endm
 __LIBC_MAYBE_ADD_SAME strcat, GENERAL
 
+; Optimized for size. EAX == s1, EDX == s2.
 %macro __LIBC_FUNC_strcmp 0
 		push esi
-		xchg eax, esi
+		xchg eax, esi		; ESI := s1, EAX := junk.
 		xor eax, eax
 		xchg edi, edx
 .5:		lodsb
@@ -406,11 +407,36 @@ __LIBC_MAYBE_ADD_SAME strcat, GENERAL
 .6:		mov al, 1
 		jae .7
 		neg eax
-.7:		xchg edi, edx
+.7:		xchg edi, edx		; Restore original EDI.
 		pop esi
 		ret
 %endm
 __LIBC_MAYBE_ADD_SAME strcmp, GENERAL
+
+; Optimized for size. EAX == s1, EDX == s2, EBX(watcall) == n, ECX(rp3) == n.
+%macro __LIBC_FUNC_memcmp 0
+		push esi
+		xchg esi, eax		; ESI := s1, EAX := junk.
+		xor eax, eax
+		xchg edi, edx
+%ifidn REGARG3,ebx
+		xchg ecx, ebx
+%endif
+		jecxz .done
+		repz cmpsb		; Continue while equal.
+		je .done
+		inc eax
+		jnc .done
+		neg eax
+.done:
+%ifidn REGARG3,ebx
+		xchg ecx, ebx		; Restore original ECX.
+%endif
+		xchg edi, edx		; Restore original EDI.
+		pop esi
+		ret
+%endm
+__LIBC_MAYBE_ADD memcmp, GENERAL
 
 %macro __LIBC_FUNC_memcpy 0
 		push edi

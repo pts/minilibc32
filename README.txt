@@ -168,8 +168,8 @@ Limitations and missing features from minilibc32:
   supported. All global variables must be initialized to a
   compile-or-link-time constant.
 * If the program doesn't use all functions, the unused ones have to be
-* Removed manually from this file; removal is hard for the syscalls and
-  easy for others.
+  removed manually from the minilibc32.nasm source file; removal is hard for
+  the syscalls and easy for others.
 * Heap memory cannot be returned to the system, there is no free(...)
   corresponding to malloc(...).
 * malloc(...) may allocate twice as much as necessary, to buffer.

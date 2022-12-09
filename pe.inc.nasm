@@ -244,9 +244,10 @@ IMAGE_IMPORT_DESCRIPTOR_0:
 .FirstThunk: dd IMPORT_ADDRESS_TABLE-__IMAGE_BASE__
 IMAGE_IMPORT_DESCRIPTOR_1:  ; Last Import directory table, marks end-of-list.
 ;dd 0, 0, 0, 0, 0  ; Same fields as above, filled with 0s.
+dd 0, 0, 0, 0  ; Windows 95 right after boot makes the program crash if 4*4 0 bytes are not hardcoded here (.bss is not enough).
 ; For the end-of-list bytes above + one more all-0 descriptor, for Windows 95
 ; HeapAlloc(...) and after-boot compatibility.
-IMAGE_IMPORT_DESCRIPTORS_BSS_SIZE equ (4*5)*3
+IMAGE_IMPORT_DESCRIPTORS_BSS_SIZE equ 4+(4*5)
 _IMPORT_end:
 IMAGE_IMPORT_DESCRIPTORS_end equ $+IMAGE_IMPORT_DESCRIPTORS_BSS_SIZE
 section .bss

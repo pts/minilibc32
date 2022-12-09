@@ -351,20 +351,46 @@ __LIBC_MAYBE_ADD_SAME toupper, GENERAL
 __LIBC_MAYBE_ADD_SAME strlen, GENERAL
 
 %macro __LIBC_FUNC_strcpy 0
+%define __LIBC_ADDED_strcpy
 		push edi
 		xchg esi, edx
-		xchg eax, edi
+		xchg eax, edi		; EDI := dest; EAX := junk.
 		push edi
-.4:		lodsb
+strcpy_again:
+		lodsb
 		stosb
 		cmp al, 0
-		jne .4
-		pop eax
-		xchg esi, edx
+		jne short strcpy_again
+		pop eax			; Will return dest.
+		xchg esi, edx		; Restore ESI.
 		pop edi
 		ret
 %endm
 __LIBC_MAYBE_ADD_SAME strcpy, GENERAL
+
+%macro __LIBC_FUNC_strcat 0
+		push edi
+		xchg esi, edx
+		xchg edi, eax		; DI := dest; AX := junk.
+		push edi
+		dec edi
+.skipagain:	inc edi
+		cmp byte [edi], 1
+		jnc .skipagain
+%ifdef __LIBC_ADDED_strcpy
+		jmp short strcpy_again
+%else
+.again:		lodsb
+		stosb
+		cmp al, 0
+		jne .again
+		pop eax			; Will return dest.
+		xchg esi, edx		; Restore ESI.
+		pop edi
+		ret
+%endif
+%endm
+__LIBC_MAYBE_ADD_SAME strcat, GENERAL
 
 %macro __LIBC_FUNC_strcmp 0
 		push esi

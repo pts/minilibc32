@@ -15,6 +15,10 @@
 ; executable program doing hello-world without overlapping the code and data
 ; with the ELF32 headers.
 ;
+; More discussion here (with 95-byte solution): https://www.reddit.com/r/programming/comments/t32i0/smallest_x86_elf_hello_world/
+;
+; More discussion here (with 92-byte solution): https://www.reddit.com/r/programming/comments/t32i0/comment/c4jkpxj/
+;
 
 		org 0x08048000
 

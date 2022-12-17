@@ -20,6 +20,7 @@
 ; More discussion here (with 92-byte solution): https://www.reddit.com/r/programming/comments/t32i0/comment/c4jkpxj/
 ;
 
+		;org 0x10000 ; Minimum value. Ubuntu 18.04 Linux 5.4.0 has this by default: sudo sysctl vm.mmap_min_addr=65536
 		org 0x08048000
 
 ehdr:					; Elf32_Ehdr

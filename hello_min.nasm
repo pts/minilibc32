@@ -2,8 +2,8 @@
 ; hello_min.nasm: minimalistic hello-world for Linux i386
 ; by pts@fazekas.hu at Wed Dec  7 04:13:28 CET 2022
 ;
-; Compile: nasm -O0 -f bin -o hello_min hello_min.nasm && chmod +x hello_min
-; The created executable program is 123 bytes.
+; Compile: nasm -O9 -f bin -o hello_min hello_min.nasm && chmod +x hello_min
+; The created executable program is 119 bytes.
 ; Run on Linux i386 or amd64: ./hello_min
 ;
 ; ELF32 header based on
@@ -52,18 +52,18 @@ phdr:					; Elf32_Phdr
 		dd 0x1000		;   p_align
 phdrsize	equ $-phdr
 
-_start:		mov eax, 4		; __NR_write.
-		;mov ebx, 1		; STDOUT_FILENO.
+_start:		;mov ebx, 1		; STDOUT_FILENO.
 		xor ebx, ebx
-		inc ebx
+		inc ebx			; EBX := 1 == STDOUT_FILENO.
+		lea eax, [ebx-1+4]	; EAX := __NR_write == 4.
 		push ebx
 		mov ecx, message	; Pointer to message string.
-		mov edx, message.end-message  ; Size of message to write.
+		lea edx, [ebx-1+message.end-message]  ; EDX := Size of message to write.
 		int 0x80		; Linux i386 syscall.
 		;mov eax, 1		; __NR_exit.
-		pop eax
+		pop eax			; EAX := 1 == __NR_exit.
 		;mov ebx, 0		; EXIT_SUCCESS.
-		dec ebx
+		dec ebx			; EBX := 0 == EXIT_SUCCESS.
 		int 0x80		; Linux i386 syscall.
 		; Not reached.
 

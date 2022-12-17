@@ -33,14 +33,14 @@ ehdr:					; Elf32_Ehdr
 		dd phdr-$$		;   e_phoff
 		dd 0			;   e_shoff
 		dd 0			;   e_flags
-		dw ehdrsize		;   e_ehsize
-		dw phdrsize		;   e_phentsize
+		dw .size		;   e_ehsize
+		dw phdr.size		;   e_phentsize
 		dw 1			;   e_phnum
 		dw 0			;   e_shentsize
 		dw 40			;   e_shnum
 		dw 0			;   e_shstrndx
-  
-ehdrsize	equ $-ehdr
+.size		equ $-ehdr
+
 phdr:					; Elf32_Phdr
 		dd 1			;   p_type
 		dd 0			;   p_offset
@@ -50,7 +50,7 @@ phdr:					; Elf32_Phdr
 		dd filesize		;   p_memsz
 		dd 5			;   p_flags
 		dd 0x1000		;   p_align
-phdrsize	equ $-phdr
+.size		equ $-phdr
 
 _start:		;mov ebx, 1		; STDOUT_FILENO.
 		xor ebx, ebx

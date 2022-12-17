@@ -6,6 +6,8 @@
 ; The created executable program is 119 bytes.
 ; Run on Linux i386 or amd64: ./hello_min
 ;
+; Disassemble: ndisasm -b 32 -e 0x54 hello_min
+;
 ; ELF32 header based on
 ; https://www.muppetlabs.com/~breadbox/software/tiny/teensy.html
 ;

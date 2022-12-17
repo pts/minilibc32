@@ -16,10 +16,8 @@
 ; with the ELF32 headers.
 ;
 
-		bits 32
-		cpu 386
 		org 0x08048000
-  
+
 ehdr:					; Elf32_Ehdr
 		db 0x7f, 'ELF'		;   e_ident[EI_MAG...]
 		db 1			;   e_ident[EI_CLASS]: 32-bit
@@ -50,11 +48,15 @@ phdr:					; Elf32_Phdr
 		dd $$			;   p_paddr
 		dd filesize		;   p_filesz
 		dd filesize		;   p_memsz
-		dd 5			;   p_flags
+		dd 5			;   p_flags: r-x: read and execute, no write
 		dd 0x1000		;   p_align
 .size		equ $-phdr
 
-_start:		;mov ebx, 1		; STDOUT_FILENO.
+_start:
+%ifndef __MININASM__
+		bits 32
+		cpu 386
+		;mov ebx, 1		; STDOUT_FILENO.
 		xor ebx, ebx
 		inc ebx			; EBX := 1 == STDOUT_FILENO.
 		lea eax, [ebx-1+4]	; EAX := __NR_write == 4.
@@ -67,9 +69,24 @@ _start:		;mov ebx, 1		; STDOUT_FILENO.
 		;mov ebx, 0		; EXIT_SUCCESS.
 		dec ebx			; EBX := 0 == EXIT_SUCCESS.
 		int 0x80		; Linux i386 syscall.
+%else  ; Hack for 16-bit assemblers such as mininasm.
+		bits 16
+		cpu 8086
+		xor bx, bx		; xor ebx, ebx
+		inc bx			; inc ebx
+		lea ax, [bp+di-1+4]	; lea eax, [ebx-1+4]
+		push bx			; push ebx
+		db 0xb9
+		dd message		; mov ecx, message
+		lea dx, [bp+di-1+message.end-message]  ; lea edx, [ebx-1+messag.end-message]
+		int 0x80		; int 0x80
+		pop ax			; pop eax
+		dec bx			; dec ebx
+		int 0x80		; int 0x80
+%endif
 		; Not reached.
 
 message:	db 'Hello, World!', 10
 .end:
-  
+
 filesize	equ $-$$
